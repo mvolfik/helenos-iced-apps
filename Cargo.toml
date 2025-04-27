@@ -1,0 +1,8 @@
+[package]
+name = "iced-test"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+iced = { version = "0.13.1", default-features = false, features = ["tiny-skia"] }
+tracing-subscriber = { version = "0.3.19", default-features = false, features = ["fmt"] }
