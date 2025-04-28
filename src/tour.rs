@@ -1,4 +1,5 @@
 use iced_widget::core::{Alignment, Color, Font, Length, Pixels};
+use iced_widget::runtime::{Program, Task};
 use iced_widget::{Button, Column, Container, Slider};
 use iced_widget::{
     button, checkbox, column, container, horizontal_space, radio, row, scrollable, slider, text,
@@ -24,6 +25,21 @@ pub struct Tour {
     input_is_secure: bool,
     input_is_showing_icon: bool,
     debug: bool,
+}
+
+impl Program for Tour {
+    type Message = Message;
+    type Renderer = iced_widget::Renderer;
+    type Theme = iced_widget::Theme;
+
+    fn update(&mut self, event: Self::Message) -> Task<Message> {
+        self.update(event);
+        Task::none()
+    }
+
+    fn view(&self) -> Element<Self::Message> {
+        self.view()
+    }
 }
 
 #[derive(Debug, Clone)]
