@@ -140,50 +140,48 @@ impl Tour {
     }
 
     fn view(&self) -> Element<Message> {
-        let f = ferris(500, image::FilterMethod::Linear);
-        column![text("ferris:"), f, text("no ferris :(")].into()
-        // let controls = row![]
-        //     .push_maybe(self.screen.previous().is_some().then(|| {
-        //         padded_button("Back")
-        //             .on_press(Message::BackPressed)
-        //             .style(button::secondary)
-        //     }))
-        //     .push(horizontal_space())
-        //     .push_maybe(
-        //         self.can_continue()
-        //             .then(|| padded_button("Next").on_press(Message::NextPressed)),
-        //     );
+        let controls = row![]
+            .push_maybe(self.screen.previous().is_some().then(|| {
+                padded_button("Back")
+                    .on_press(Message::BackPressed)
+                    .style(button::secondary)
+            }))
+            .push(horizontal_space())
+            .push_maybe(
+                self.can_continue()
+                    .then(|| padded_button("Next").on_press(Message::NextPressed)),
+            );
 
-        // let screen = match self.screen {
-        //     Screen::Welcome => self.welcome(),
-        //     Screen::Radio => self.radio(),
-        //     Screen::Toggler => self.toggler(),
-        //     Screen::Slider => self.slider(),
-        //     Screen::Text => self.text(),
-        //     Screen::Image => self.image(),
-        //     Screen::RowsAndColumns => self.rows_and_columns(),
-        //     Screen::Scrollable => self.scrollable(),
-        //     Screen::TextInput => self.text_input(),
-        //     Screen::Debugger => self.debugger(),
-        //     Screen::End => self.end(),
-        // };
+        let screen = match self.screen {
+            Screen::Welcome => self.welcome(),
+            Screen::Radio => self.radio(),
+            Screen::Toggler => self.toggler(),
+            Screen::Slider => self.slider(),
+            Screen::Text => self.text(),
+            Screen::Image => self.image(),
+            Screen::RowsAndColumns => self.rows_and_columns(),
+            Screen::Scrollable => self.scrollable(),
+            Screen::TextInput => self.text_input(),
+            Screen::Debugger => self.debugger(),
+            Screen::End => self.end(),
+        };
 
-        // let content: Element<_> = column![screen, controls,]
-        //     .max_width(540)
-        //     .spacing(20)
-        //     .padding(20)
-        //     .into();
+        let content: Element<_> = column![screen, controls,]
+            .max_width(540)
+            .spacing(20)
+            .padding(20)
+            .into();
 
-        // let scrollable = scrollable(
-        //     container(if self.debug {
-        //         content.explain(Color::BLACK)
-        //     } else {
-        //         content
-        //     })
-        //     .center_x(Fill),
-        // );
+        let scrollable = scrollable(
+            container(if self.debug {
+                content.explain(Color::BLACK)
+            } else {
+                content
+            })
+            .center_x(Fill),
+        );
 
-        // container(scrollable).center_y(Fill).into()
+        container(scrollable).center_y(Fill).into()
     }
 
     fn can_continue(&self) -> bool {
@@ -488,11 +486,11 @@ enum Screen {
 impl Screen {
     const ALL: &'static [Self] = &[
         Self::Welcome,
-        // Self::Slider,
-        // Self::RowsAndColumns,
-        // Self::Text,
-        // Self::Radio,
-        // Self::Toggler,
+        Self::Slider,
+        Self::RowsAndColumns,
+        Self::Text,
+        Self::Radio,
+        Self::Toggler,
         Self::Image,
         Self::Scrollable,
         Self::TextInput,
@@ -530,15 +528,9 @@ impl Screen {
 
 fn ferris<'a>(width: u16, filter_method: image::FilterMethod) -> Container<'a, Message> {
     container(
-        // This should go away once we unify resource loading on native
-        // platforms
-        if cfg!(target_arch = "wasm32") {
-            image("tour/images/ferris.png")
-        } else {
-            image("/home/volfmatej/Pictures/amanita_wp.jpg")
-        }
-        .filter_method(filter_method)
-        .width(width),
+        image("/home/volfmatej/Pictures/amanita_wp.jpg")
+            .filter_method(filter_method)
+            .width(width),
     )
     .center_x(Fill)
 }
