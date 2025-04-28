@@ -1,4 +1,4 @@
-use iced_widget::core::{Alignment, Color, Element, Font, Length, Pixels};
+use iced_widget::core::{Alignment, Color, Font, Length, Pixels};
 use iced_widget::{Button, Column, Container, Slider};
 use iced_widget::{
     button, checkbox, column, container, horizontal_space, radio, row, scrollable, slider, text,
@@ -7,6 +7,8 @@ use iced_widget::{
 
 use Alignment::Center;
 use Length::Fill;
+
+use crate::Element;
 
 pub struct Tour {
     screen: Screen,
@@ -112,7 +114,7 @@ impl Tour {
         }
     }
 
-    pub fn view(&self) -> Element<Message, iced_widget::Theme, iced_widget::Renderer> {
+    pub fn view(&self) -> Element<Message> {
         let controls = row![]
             .push_maybe(self.screen.previous().is_some().then(|| {
                 padded_button("Back")
@@ -139,7 +141,7 @@ impl Tour {
             Screen::End => self.end(),
         };
 
-        let content: Element<_, iced_widget::Theme, iced_widget::Renderer> =
+        let content: Element<_> =
             column![Element::from(screen), Element::from(controls)]
                 .max_width(540)
                 .spacing(20)
@@ -232,7 +234,7 @@ impl Tour {
             Message::LayoutChanged,
         );
 
-        let layout_section: Element<_, iced_widget::Theme, iced_widget::Renderer> =
+        let layout_section: Element<_> =
             match self.layout {
                 Layout::Row => row![row_radio, column_radio].spacing(self.spacing).into(),
                 Layout::Column => column![row_radio, column_radio]

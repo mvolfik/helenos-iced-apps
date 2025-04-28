@@ -1,14 +1,23 @@
 use std::num::NonZeroU32;
 use std::rc::Rc;
 
+use iced_widget::core::{Color, Font, Pixels, Size};
+use iced_widget::graphics::Viewport;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::window::{Window, WindowId};
 
+mod tour;
+
+pub type Element<'a, M> =
+    iced_widget::core::Element<'a, M, iced_widget::core::Theme, iced_widget::renderer::Renderer>;
+
 struct State {
     w: Rc<Window>,
     surface: softbuffer::Surface<Rc<Window>, Rc<Window>>,
+    app: tour::Tour,
+    renderer: iced_tiny_skia::Renderer,
 }
 
 struct App {
@@ -16,7 +25,7 @@ struct App {
 }
 
 impl State {
-    fn redraw(&mut self, el: &ActiveEventLoop) {
+    fn redraw(&mut self, el: &ActiveEventLoop, view: &Element<tour::Message>) {
         let s = self.w.inner_size();
         self.surface
             .resize(
@@ -25,16 +34,14 @@ impl State {
             )
             .unwrap();
         let mut buffer = self.surface.buffer_mut().unwrap();
-        for y in 0..s.height {
-            for x in 0..s.width {
-                let red = x % 255;
-                let green = y % 255;
-                let blue = (y * 100 / 255 + x * 200 / 255) % 255;
-
-                buffer[(y * s.width + x) as usize] = blue | (green << 8) | (red << 16);
-            }
-        }
-        buffer.present().unwrap();
+        let sk_surface = iced_tiny_skia::window::Surface
+        iced_tiny_skia::window::compositor::present(
+            &mut self.renderer,
+            &mut self.surface,
+            &Viewport::with_physical_size(Size::new(s.width, s.height), self.w.scale_factor()),
+            Color::BLACK,
+            &[],
+        );
     }
 }
 
@@ -49,6 +56,8 @@ impl ApplicationHandler for App {
             )
             .unwrap(),
             w,
+            app: tour::Tour::default(),
+            renderer: iced_tiny_skia::Renderer::new(Font::DEFAULT, Pixels(10.0)),
         });
         self.state.as_mut().unwrap().redraw(el);
     }
