@@ -91,31 +91,34 @@ fn umain() -> anyhow::Result<()> {
         value_list: &[x::Gc::Foreground(screen.black_pixel())],
     })?;
 
+    let stride = S * 4;
+    let mut data = vec![0; S * stride];
+
+    for y in 0..S {
+        for x in 0..S {
+            let bi = y * stride + x * 4;
+            if y > 100 && y < 150 && x > 300 && x < 400 {
+                data[bi] = 255;
+                data[bi + 1] = 0;
+                data[bi + 2] = 0;
+                data[bi + 3] = 0;
+            } else {
+                data[bi] = 0;
+                data[bi + 1] = 0;
+                data[bi + 2] = 0;
+                data[bi + 3] = 0;
+            }
+        }
+    }
+
     let pixmap = conn.generate_id();
     conn.send_and_check_request(&x::CreatePixmap {
-        depth: 24,
+        depth: 32,
         pid: pixmap,
         drawable: x::Drawable::Window(window),
         width: S as u16,
         height: S as u16,
     })?;
-
-    let resp = conn.wait_for_reply(conn.send_request(&dri3::BufferFromPixmap { pixmap }))?;
-    let len = resp.size() as usize;
-    let stride = resp.stride() as usize;
-    println!("Buffer length: {len} stride {stride} {resp:?}");
-    
-    assert!(resp.bpp() == 32);
-    assert!(resp.depth() == 24);
-
-    let mut map = unsafe {
-        memmap2::MmapOptions::new()
-            .len(len)
-            .map_mut(resp.pixmap_fd())
-    }?;
-
-    conn.flush()?;
-
 
     let mut colors = ColorIt {
         r: 255,
@@ -124,56 +127,46 @@ fn umain() -> anyhow::Result<()> {
         step: Step::IncreaseG,
     };
 
-    // for y in 0..S {
-    //     for x in 0..S {
-    //         let bi = y * stride + x * 3;
-    //         if y > 100 && y < 150 && x > 300 && x < 400 {
-    //             map[bi] = 255;
-    //             map[bi + 1] = 0;
-    //             map[bi + 2] = 0;
-    //             map[bi + 3] = 0;
-    //         } else {
-    //             map[bi] = 0;
-    //             map[bi + 1] = 0;
-    //             map[bi + 2] = 0;
-    //             map[bi + 3] = 0;
-    //         }
-    //     }
-    // }
+    let pixmapgc = conn.generate_id();
+    conn.send_and_check_request(&x::CreateGc {
+        cid: pixmapgc,
+        drawable: x::Drawable::Pixmap(pixmap),
+        value_list: &[],
+    })?;
 
-    for i in 0..len {
-        map[i] = 0;
-    }
-
-    for y in 0..S {
-        for x in [25] {
-            let bi = y * stride + x * 4;
-            map[bi] = y as u8;
-            map[bi + 1] = 0;
-            map[bi + 2] = 0;
-            map[bi + 3] = 0;
-        }
-    }
-    map.flush()?;
-
-    conn.send_and_check_request(&x::CopyArea {
-        src_drawable: x::Drawable::Pixmap(pixmap),
-        dst_drawable: x::Drawable::Window(window),
-        gc,
-        src_x: 0,
-        src_y: 0,
-        dst_x: 0,
-        dst_y: 0,
+    conn.send_and_check_request(&x::PutImage {
+        format: x::ImageFormat::ZPixmap,
+        drawable: x::Drawable::Pixmap(pixmap),
+        gc: pixmapgc,
         width: S as u16,
         height: S as u16,
+        left_pad: 0,
+        depth: 24,
+        data: &data,
+        dst_x: 0,
+        dst_y: 0,
     })?;
 
     conn.flush()?;
 
     loop {
         match conn.wait_for_event()? {
-            xcb::Event::X(x::Event::KeyPress(ev)) => {
+            xcb::Event::X(x::Event::Expose(ev)) => {
+                println!("Expose: {:?}", ev);
+                conn.send_and_check_request(&x::CopyArea {
+                    src_drawable: x::Drawable::Pixmap(pixmap),
+                    dst_drawable: x::Drawable::Window(window),
+                    gc,
+                    src_x: 0,
+                    src_y: 0,
+                    dst_x: 0,
+                    dst_y: 0,
+                    width: S as u16,
+                    height: S as u16,
+                })?;
+                conn.flush()?;
             }
+            xcb::Event::X(x::Event::KeyPress(ev)) => {}
             _ => {}
         }
     }
