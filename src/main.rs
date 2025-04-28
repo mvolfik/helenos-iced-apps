@@ -81,7 +81,6 @@ impl App {}
 
 impl ApplicationHandler for App {
     fn resumed(&mut self, el: &ActiveEventLoop) {
-        println!("Resumed");
         let w = Arc::new(el.create_window(Window::default_attributes()).unwrap());
         let mut compositor = iced_tiny_skia::window::compositor::new(
             Settings {

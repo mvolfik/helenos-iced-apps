@@ -2,8 +2,8 @@ use iced_widget::core::{Alignment, Color, Font, Length, Pixels};
 use iced_widget::runtime::{Program, Task};
 use iced_widget::{Button, Column, Container, Slider};
 use iced_widget::{
-    button, checkbox, column, container, horizontal_space, radio, row, scrollable, slider, text,
-    text_input, toggler, vertical_space,
+    button, checkbox, column, container, horizontal_space, image, radio, row, scrollable, slider,
+    text, text_input, toggler, vertical_space,
 };
 
 use Alignment::Center;
@@ -21,6 +21,7 @@ pub struct Tour {
     language: Option<Language>,
     toggler: bool,
     image_width: u16,
+    image_filter_method: image::FilterMethod,
     input_value: String,
     input_is_secure: bool,
     input_is_showing_icon: bool,
@@ -53,6 +54,7 @@ pub enum Message {
     TextColorChanged(Color),
     LanguageSelected(Language),
     ImageWidthChanged(u16),
+    ImageUseNearestToggled(bool),
     InputChanged(String),
     ToggleSecureInput(bool),
     ToggleTextInputIcon(bool),
@@ -79,7 +81,7 @@ impl Tour {
         format!("{} - Iced", screen)
     }
 
-    pub fn update(&mut self, event: Message) {
+    fn update(&mut self, event: Message) {
         match event {
             Message::BackPressed => {
                 if let Some(screen) = self.screen.previous() {
@@ -112,6 +114,13 @@ impl Tour {
             Message::ImageWidthChanged(image_width) => {
                 self.image_width = image_width;
             }
+            Message::ImageUseNearestToggled(use_nearest) => {
+                self.image_filter_method = if use_nearest {
+                    image::FilterMethod::Nearest
+                } else {
+                    image::FilterMethod::Linear
+                };
+            }
             Message::InputChanged(input_value) => {
                 self.input_value = input_value;
             }
@@ -130,50 +139,51 @@ impl Tour {
         }
     }
 
-    pub fn view(&self) -> Element<Message> {
-        let controls = row![]
-            .push_maybe(self.screen.previous().is_some().then(|| {
-                padded_button("Back")
-                    .on_press(Message::BackPressed)
-                    .style(button::secondary)
-            }))
-            .push(horizontal_space())
-            .push_maybe(
-                self.can_continue()
-                    .then(|| padded_button("Next").on_press(Message::NextPressed)),
-            );
+    fn view(&self) -> Element<Message> {
+        let f = ferris(500, image::FilterMethod::Linear);
+        column![text("ferris:"), f, text("no ferris :(")].into()
+        // let controls = row![]
+        //     .push_maybe(self.screen.previous().is_some().then(|| {
+        //         padded_button("Back")
+        //             .on_press(Message::BackPressed)
+        //             .style(button::secondary)
+        //     }))
+        //     .push(horizontal_space())
+        //     .push_maybe(
+        //         self.can_continue()
+        //             .then(|| padded_button("Next").on_press(Message::NextPressed)),
+        //     );
 
-        let screen = match self.screen {
-            Screen::Welcome => self.welcome(),
-            Screen::Radio => self.radio(),
-            Screen::Toggler => self.toggler(),
-            Screen::Slider => self.slider(),
-            Screen::Text => self.text(),
-            Screen::Image => self.image(),
-            Screen::RowsAndColumns => self.rows_and_columns(),
-            Screen::Scrollable => self.scrollable(),
-            Screen::TextInput => self.text_input(),
-            Screen::Debugger => self.debugger(),
-            Screen::End => self.end(),
-        };
+        // let screen = match self.screen {
+        //     Screen::Welcome => self.welcome(),
+        //     Screen::Radio => self.radio(),
+        //     Screen::Toggler => self.toggler(),
+        //     Screen::Slider => self.slider(),
+        //     Screen::Text => self.text(),
+        //     Screen::Image => self.image(),
+        //     Screen::RowsAndColumns => self.rows_and_columns(),
+        //     Screen::Scrollable => self.scrollable(),
+        //     Screen::TextInput => self.text_input(),
+        //     Screen::Debugger => self.debugger(),
+        //     Screen::End => self.end(),
+        // };
 
-        let content: Element<_> =
-            column![Element::from(screen), Element::from(controls)]
-                .max_width(540)
-                .spacing(20)
-                .padding(20)
-                .into();
+        // let content: Element<_> = column![screen, controls,]
+        //     .max_width(540)
+        //     .spacing(20)
+        //     .padding(20)
+        //     .into();
 
-        let scrollable = scrollable(
-            container(if self.debug {
-                content.explain(Color::BLACK)
-            } else {
-                content
-            })
-            .center_x(Fill),
-        );
+        // let scrollable = scrollable(
+        //     container(if self.debug {
+        //         content.explain(Color::BLACK)
+        //     } else {
+        //         content
+        //     })
+        //     .center_x(Fill),
+        // );
 
-        container(scrollable).center_y(Fill).into()
+        // container(scrollable).center_y(Fill).into()
     }
 
     fn can_continue(&self) -> bool {
@@ -250,13 +260,12 @@ impl Tour {
             Message::LayoutChanged,
         );
 
-        let layout_section: Element<_> =
-            match self.layout {
-                Layout::Row => row![row_radio, column_radio].spacing(self.spacing).into(),
-                Layout::Column => column![row_radio, column_radio]
-                    .spacing(self.spacing)
-                    .into(),
-            };
+        let layout_section: Element<_> = match self.layout {
+            Layout::Row => row![row_radio, column_radio].spacing(self.spacing).into(),
+            Layout::Column => column![row_radio, column_radio]
+                .spacing(self.spacing)
+                .into(),
+        };
 
         let spacing_section = column![
             slider(0..=80, self.spacing, Message::SpacingChanged),
@@ -360,12 +369,20 @@ impl Tour {
 
     fn image(&self) -> Column<Message> {
         let width = self.image_width;
+        let filter_method = self.image_filter_method;
 
         Self::container("Image")
             .push("An image that tries to keep its aspect ratio.")
-            // .push(ferris(width, filter_method))
+            .push(ferris(width, filter_method))
             .push(slider(100..=500, width, Message::ImageWidthChanged))
             .push(text!("Width: {width} px").width(Fill).align_x(Center))
+            .push(
+                checkbox(
+                    "Use nearest interpolation",
+                    filter_method == image::FilterMethod::Nearest,
+                )
+                .on_toggle(Message::ImageUseNearestToggled),
+            )
             .align_x(Center)
     }
 
@@ -384,7 +401,7 @@ impl Tour {
                     .align_x(Center),
             )
             .push(vertical_space().height(4096))
-            // .push(ferris(300, image::FilterMethod::Linear))
+            .push(ferris(300, image::FilterMethod::Linear))
             .push(text("You made it!").width(Fill).size(50).align_x(Center))
     }
 
@@ -471,11 +488,11 @@ enum Screen {
 impl Screen {
     const ALL: &'static [Self] = &[
         Self::Welcome,
-        Self::Slider,
-        Self::RowsAndColumns,
-        Self::Text,
-        Self::Radio,
-        Self::Toggler,
+        // Self::Slider,
+        // Self::RowsAndColumns,
+        // Self::Text,
+        // Self::Radio,
+        // Self::Toggler,
         Self::Image,
         Self::Scrollable,
         Self::TextInput,
@@ -511,29 +528,22 @@ impl Screen {
     }
 }
 
-// fn ferris<'a>(width: u16, filter_method: image::FilterMethod) -> Container<'a, Message> {
-//     container(
-//         // This should go away once we unify resource loading on native
-//         // platforms
-//         if cfg!(target_arch = "wasm32") {
-//             image("tour/images/ferris.png")
-//         } else {
-//             image("/home/volfmatej/Pictures/amanita_wp.jpg")
-//         }
-//         .filter_method(filter_method)
-//         .width(width),
-//     )
-//     .center_x(Fill)
-// }
+fn ferris<'a>(width: u16, filter_method: image::FilterMethod) -> Container<'a, Message> {
+    container(
+        // This should go away once we unify resource loading on native
+        // platforms
+        if cfg!(target_arch = "wasm32") {
+            image("tour/images/ferris.png")
+        } else {
+            image("/home/volfmatej/Pictures/amanita_wp.jpg")
+        }
+        .filter_method(filter_method)
+        .width(width),
+    )
+    .center_x(Fill)
+}
 
-fn padded_button<
-    'a,
-    Message: Clone,
-    T: iced_widget::button::Catalog + iced_widget::text::Catalog + 'a,
-    R: iced_widget::core::Renderer + iced_widget::core::text::Renderer + 'a,
->(
-    label: &'a str,
-) -> Button<'a, Message, T, R> {
+fn padded_button<Message: Clone>(label: &str) -> Button<'_, Message> {
     button(text(label)).padding([12, 24])
 }
 
@@ -601,6 +611,7 @@ impl Default for Tour {
             language: None,
             toggler: false,
             image_width: 300,
+            image_filter_method: image::FilterMethod::Linear,
             input_value: String::new(),
             input_is_secure: false,
             input_is_showing_icon: false,
