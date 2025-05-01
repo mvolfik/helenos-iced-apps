@@ -1,12 +1,8 @@
 use std::mem;
 use std::sync::Arc;
 
-use iced_tiny_skia::Settings;
 use iced_widget::core::mouse::{self, Cursor, Interaction};
-use iced_widget::core::{Event, Font, Pixels, Point, Size, keyboard};
-use iced_widget::graphics::Compositor;
-use iced_widget::runtime::Debug;
-use iced_widget::runtime::program::State;
+use iced_widget::core::{Event, Point, keyboard};
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, EventLoop};
@@ -24,9 +20,9 @@ pub struct App {
 
 impl ApplicationHandler for App {
     fn resumed(&mut self, el: &ActiveEventLoop) {
-        self.inner = Some(AppInner::new(
+        self.inner = Some(AppInner::new(Arc::new(
             el.create_window(Window::default_attributes()).unwrap(),
-        ));
+        )));
         self.inner
             .as_mut()
             .unwrap()
@@ -107,8 +103,7 @@ impl ApplicationHandler for App {
                     winit::event::ElementState::Released => mouse::Event::ButtonReleased(button),
                 }));
             }
-
-            e => {}
+            _ => {}
         }
         if !is_redraw {
             self.inner.as_ref().unwrap().w.request_redraw();

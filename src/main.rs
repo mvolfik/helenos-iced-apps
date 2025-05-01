@@ -1,11 +1,14 @@
-use std::mem;
+#![feature(never_type)]
+#![feature(unwrap_infallible)]
+#![feature(float_minimum_maximum)]
+
 use std::sync::Arc;
 
 use iced_tiny_skia::Settings;
 use iced_widget::Theme;
-use iced_widget::core::mouse::{self, Cursor};
+use iced_widget::core::mouse::Cursor;
 use iced_widget::core::renderer::Style;
-use iced_widget::core::{Color, Event, Font, Pixels, Point, Size, clipboard, keyboard};
+use iced_widget::core::{Color, Event, Font, Pixels, Size, clipboard};
 use iced_widget::graphics::{Compositor, Viewport};
 use iced_widget::runtime::Debug;
 use iced_widget::runtime::program::State;
@@ -35,6 +38,15 @@ struct AppInner {
 
     program: State<tour::Tour>,
     debug: Debug,
+}
+
+impl std::fmt::Debug for AppInner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AppInner")
+            .field("w", &self.w)
+            .field("program", &self.program.program())
+            .finish_non_exhaustive()
+    }
 }
 
 impl AppInner {
@@ -70,8 +82,7 @@ impl AppInner {
             .unwrap();
     }
 
-    fn new(w: platform::Window) -> Self {
-        let w = Arc::new(w);
+    fn new(w: Arc<platform::Window>) -> Self {
         let mut compositor = iced_tiny_skia::window::compositor::new(
             Settings {
                 default_font: Font::DEFAULT,
@@ -86,7 +97,7 @@ impl AppInner {
             compositor,
             w,
             program: State::new(
-                crate::tour::Tour::default(),
+                crate::tour::Tour::new(std::env::args().nth(1)),
                 Size::new(300.0, 200.0),
                 &mut renderer,
                 &mut debug,

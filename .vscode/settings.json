@@ -1,0 +1,5 @@
+{
+    "rust-analyzer.cargo.extraEnv": {
+        "HELENOS_INCLUDE_BASE": "/home/volfmatej/dev/helenos-rust/iced-test/../helenos/amd64/export-dev/include"
+    }
+}

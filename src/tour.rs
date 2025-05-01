@@ -1,31 +1,60 @@
-use iced_widget::core::{Alignment, Color, Font, Length, Pixels};
-use iced_widget::runtime::{Program, Task};
-use iced_widget::{Button, Column, Container, Slider};
-use iced_widget::{
-    button, checkbox, column, container, horizontal_space, image, radio, row, scrollable, slider,
-    text, text_input, toggler, vertical_space,
-};
+use std::path::{Path, PathBuf};
 
-use Alignment::Center;
-use Length::Fill;
+use bytes::Bytes;
+use iced_widget::button::Style;
+use iced_widget::core::{Background, Color, ContentFit, Length, Padding, Shadow, border};
+use iced_widget::runtime::{Program, Task};
+use iced_widget::{button, column, container, image as iced_image, row, scrollable, slider, text};
+use image::{EncodableLayout, RgbaImage};
 
 use crate::Element;
 
+type Font = <iced_widget::renderer::Renderer as iced_widget::core::text::Renderer>::Font;
+
+#[derive(Debug, Clone)]
+struct ImageInfo {
+    width: u32,
+    height: u32,
+    image: RgbaImage,
+    bytes: Bytes,
+    name: String,
+    zoom: f32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FolderItem {
+    name: String,
+    is_dir: bool,
+}
+
+impl Ord for FolderItem {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        match (self.is_dir, other.is_dir) {
+            (true, true) | (false, false) => self.name.cmp(&other.name),
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+        }
+    }
+}
+impl PartialOrd for FolderItem {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+#[derive(Debug, Clone)]
+enum State {
+    ChoosingImage {
+        folder: PathBuf,
+        items: Vec<FolderItem>,
+        message: Option<String>,
+    },
+    ViewingImage(ImageInfo),
+}
+
+#[derive(Debug)]
 pub struct Tour {
-    screen: Screen,
-    slider: u8,
-    layout: Layout,
-    spacing: u16,
-    text_size: u16,
-    text_color: Color,
-    language: Option<Language>,
-    toggler: bool,
-    image_width: u16,
-    image_filter_method: image::FilterMethod,
-    input_value: String,
-    input_is_secure: bool,
-    input_is_showing_icon: bool,
-    debug: bool,
+    state: State,
 }
 
 impl Program for Tour {
@@ -34,8 +63,7 @@ impl Program for Tour {
     type Theme = iced_widget::Theme;
 
     fn update(&mut self, event: Self::Message) -> Task<Message> {
-        self.update(event);
-        Task::none()
+        self.update(event)
     }
 
     fn view(&self) -> Element<Self::Message> {
@@ -45,569 +73,246 @@ impl Program for Tour {
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    BackPressed,
-    NextPressed,
-    SliderChanged(u8),
-    LayoutChanged(Layout),
-    SpacingChanged(u16),
-    TextSizeChanged(u16),
-    TextColorChanged(Color),
-    LanguageSelected(Language),
-    ImageWidthChanged(u16),
-    ImageUseNearestToggled(bool),
-    InputChanged(String),
-    ToggleSecureInput(bool),
-    ToggleTextInputIcon(bool),
-    DebugToggled(bool),
-    TogglerChanged(bool),
+    ImageClosed,
+    SubfolderSelected(String),
+    SubfolderUp,
+    ImageSelected(String),
+    ZoomChanged(f32),
 }
 
+fn list_folder(folder: &Path) -> Vec<FolderItem> {
+    let items = match std::fs::read_dir(folder) {
+        Ok(i) => i,
+        Err(e) => {
+            eprintln!("Error reading directory: {e}");
+            return vec![];
+        }
+    };
+
+    let mut items: Vec<FolderItem> = items
+        .filter_map(|entry| {
+            let entry = entry.unwrap();
+            let file_type = entry.file_type().unwrap();
+            let is_dir = if file_type.is_dir() {
+                true
+            } else if file_type.is_file() {
+                false
+            } else {
+                return None;
+            };
+            Some(FolderItem {
+                name: entry.file_name().into_string().unwrap(),
+                is_dir,
+            })
+        })
+        .collect();
+    items.sort();
+    items
+}
+
+fn load_image(path: &Path) -> Result<ImageInfo, String> {
+    let name = path.file_name().map_or_else(
+        || "Error opening file: missing filename".to_owned(),
+        |name| name.to_string_lossy().into_owned(),
+    );
+    let image = std::fs::read(path).map_err(|e| format!("Error reading image: {e}"))?;
+    let image = image::load_from_memory(&image).map_err(|e| format!("error parsing image: {e}"))?;
+    let image = image.into_rgba8();
+    Ok(ImageInfo {
+        width: image.width(),
+        height: image.height(),
+        bytes: Bytes::copy_from_slice(image.as_bytes()),
+        image,
+        zoom: 1.0,
+        name,
+    })
+}
+
+const DEFAULT_MSG: &'static str = "Please select an image";
+
 impl Tour {
-    fn title(&self) -> String {
-        let screen = match self.screen {
-            Screen::Welcome => "Welcome",
-            Screen::Radio => "Radio button",
-            Screen::Toggler => "Toggler",
-            Screen::Slider => "Slider",
-            Screen::Text => "Text",
-            Screen::Image => "Image",
-            Screen::RowsAndColumns => "Rows and columns",
-            Screen::Scrollable => "Scrollable",
-            Screen::TextInput => "Text input",
-            Screen::Debugger => "Debugger",
-            Screen::End => "End",
-        };
+    fn update(&mut self, event: Message) -> Task<Message> {
+        if let State::ChoosingImage { message, .. } = &mut self.state {
+            *message = None;
+        }
 
-        format!("{} - Iced", screen)
-    }
-
-    fn update(&mut self, event: Message) {
-        match event {
-            Message::BackPressed => {
-                if let Some(screen) = self.screen.previous() {
-                    self.screen = screen;
+        match (event, &mut self.state) {
+            (
+                Message::ImageSelected(name),
+                State::ChoosingImage {
+                    folder, message, ..
+                },
+            ) => match load_image(&folder.join(&name)) {
+                Err(e) => {
+                    *message = Some(e);
                 }
-            }
-            Message::NextPressed => {
-                if let Some(screen) = self.screen.next() {
-                    self.screen = screen;
+                Ok(image) => {
+                    self.state = State::ViewingImage(image);
                 }
+            },
+            (Message::SubfolderSelected(subfolder), State::ChoosingImage { folder, items, .. }) => {
+                folder.push(subfolder);
+                *items = list_folder(folder);
             }
-            Message::SliderChanged(value) => {
-                self.slider = value;
-            }
-            Message::LayoutChanged(layout) => {
-                self.layout = layout;
-            }
-            Message::SpacingChanged(spacing) => {
-                self.spacing = spacing;
-            }
-            Message::TextSizeChanged(text_size) => {
-                self.text_size = text_size;
-            }
-            Message::TextColorChanged(text_color) => {
-                self.text_color = text_color;
-            }
-            Message::LanguageSelected(language) => {
-                self.language = Some(language);
-            }
-            Message::ImageWidthChanged(image_width) => {
-                self.image_width = image_width;
-            }
-            Message::ImageUseNearestToggled(use_nearest) => {
-                self.image_filter_method = if use_nearest {
-                    image::FilterMethod::Nearest
-                } else {
-                    image::FilterMethod::Linear
+            (Message::ImageClosed, State::ViewingImage { .. }) => {
+                let mut folder = PathBuf::new();
+                folder.push("/");
+                self.state = State::ChoosingImage {
+                    items: list_folder(&folder),
+                    folder,
+                    message: None,
                 };
             }
-            Message::InputChanged(input_value) => {
-                self.input_value = input_value;
+            (Message::SubfolderUp, State::ChoosingImage { folder, items, .. }) => {
+                folder.pop();
+                *items = list_folder(folder);
             }
-            Message::ToggleSecureInput(is_secure) => {
-                self.input_is_secure = is_secure;
+            (Message::ZoomChanged(z), State::ViewingImage(img)) => {
+                img.zoom = z;
+                img.bytes = image::imageops::resize(
+                    &img.image,
+                    (img.width as f32 * z) as u32,
+                    (img.height as f32 * z) as u32,
+                    image::imageops::FilterType::Lanczos3,
+                )
+                .into_raw()
+                .into();
             }
-            Message::ToggleTextInputIcon(show_icon) => {
-                self.input_is_showing_icon = show_icon;
-            }
-            Message::DebugToggled(debug) => {
-                self.debug = debug;
-            }
-            Message::TogglerChanged(toggler) => {
-                self.toggler = toggler;
+            x => {
+                eprintln!("Incorrect message: {x:?}");
             }
         }
+        Task::none()
     }
 
     fn view(&self) -> Element<Message> {
-        let controls = row![]
-            .push_maybe(self.screen.previous().is_some().then(|| {
-                padded_button("Back")
-                    .on_press(Message::BackPressed)
-                    .style(button::secondary)
-            }))
-            .push(horizontal_space())
-            .push_maybe(
-                self.can_continue()
-                    .then(|| padded_button("Next").on_press(Message::NextPressed)),
-            );
-
-        let screen = match self.screen {
-            Screen::Welcome => self.welcome(),
-            Screen::Radio => self.radio(),
-            Screen::Toggler => self.toggler(),
-            Screen::Slider => self.slider(),
-            Screen::Text => self.text(),
-            Screen::Image => self.image(),
-            Screen::RowsAndColumns => self.rows_and_columns(),
-            Screen::Scrollable => self.scrollable(),
-            Screen::TextInput => self.text_input(),
-            Screen::Debugger => self.debugger(),
-            Screen::End => self.end(),
-        };
-
-        let content: Element<_> = column![screen, controls,]
-            .max_width(540)
-            .spacing(20)
-            .padding(20)
-            .into();
-
-        let scrollable = scrollable(
-            container(if self.debug {
-                content.explain(Color::BLACK)
-            } else {
-                content
-            })
-            .center_x(Fill),
-        );
-
-        container(scrollable).center_y(Fill).into()
-    }
-
-    fn can_continue(&self) -> bool {
-        match self.screen {
-            Screen::Welcome => true,
-            Screen::Radio => self.language == Some(Language::Rust),
-            Screen::Toggler => self.toggler,
-            Screen::Slider => true,
-            Screen::Text => true,
-            Screen::Image => true,
-            Screen::RowsAndColumns => true,
-            Screen::Scrollable => true,
-            Screen::TextInput => !self.input_value.is_empty(),
-            Screen::Debugger => true,
-            Screen::End => false,
+        match &self.state {
+            State::ChoosingImage {
+                folder,
+                items,
+                message,
+            } => self.image_chooser(folder, items, message.clone()),
+            State::ViewingImage(img) => self.image_viewer(img),
         }
     }
 
-    fn welcome(&self) -> Column<Message> {
-        Self::container("Welcome!")
-            .push(
-                "This is a simple tour meant to showcase a bunch of widgets \
-                 that can be easily implemented on top of Iced.",
-            )
-            .push(
-                "Iced is a cross-platform GUI library for Rust focused on \
-                 simplicity and type-safety. It is heavily inspired by Elm.",
-            )
-            .push(
-                "It was originally born as part of Coffee, an opinionated \
-                 2D game engine for Rust.",
-            )
-            .push(
-                "On native platforms, Iced provides by default a renderer \
-                 built on top of wgpu, a graphics library supporting Vulkan, \
-                 Metal, DX11, and DX12.",
-            )
-            .push(
-                "Additionally, this tour can also run on WebAssembly thanks \
-                 to dodrio, an experimental VDOM library for Rust.",
-            )
-            .push(
-                "You will need to interact with the UI in order to reach the \
-                 end!",
-            )
-    }
-
-    fn slider(&self) -> Column<Message> {
-        Self::container("Slider")
-            .push(
-                "A slider allows you to smoothly select a value from a range \
-                 of values.",
-            )
-            .push(
-                "The following slider lets you choose an integer from \
-                 0 to 100:",
-            )
-            .push(slider(0..=100, self.slider, Message::SliderChanged))
-            .push(text(self.slider.to_string()).width(Fill).align_x(Center))
-    }
-
-    fn rows_and_columns(&self) -> Column<Message> {
-        let row_radio = radio(
-            "Row",
-            Layout::Row,
-            Some(self.layout),
-            Message::LayoutChanged,
-        );
-
-        let column_radio = radio(
-            "Column",
-            Layout::Column,
-            Some(self.layout),
-            Message::LayoutChanged,
-        );
-
-        let layout_section: Element<_> = match self.layout {
-            Layout::Row => row![row_radio, column_radio].spacing(self.spacing).into(),
-            Layout::Column => column![row_radio, column_radio]
-                .spacing(self.spacing)
-                .into(),
-        };
-
-        let spacing_section = column![
-            slider(0..=80, self.spacing, Message::SpacingChanged),
-            text!("{} px", self.spacing).width(Fill).align_x(Center),
-        ]
-        .spacing(10);
-
-        Self::container("Rows and columns")
-            .spacing(self.spacing)
-            .push(
-                "Iced uses a layout model based on flexbox to position UI \
-                 elements.",
-            )
-            .push(
-                "Rows and columns can be used to distribute content \
-                 horizontally or vertically, respectively.",
-            )
-            .push(layout_section)
-            .push("You can also easily change the spacing between elements:")
-            .push(spacing_section)
-    }
-
-    fn text(&self) -> Column<Message> {
-        let size = self.text_size;
-        let color = self.text_color;
-
-        let size_section = column![
-            "You can change its size:",
-            text!("This text is {size} pixels").size(size),
-            slider(10..=70, size, Message::TextSizeChanged),
-        ]
-        .padding(20)
-        .spacing(20);
-
-        let color_sliders = row![
-            color_slider(color.r, move |r| Color { r, ..color }),
-            color_slider(color.g, move |g| Color { g, ..color }),
-            color_slider(color.b, move |b| Color { b, ..color }),
-        ]
-        .spacing(10);
-
-        let color_section = column![
-            "And its color:",
-            text!("{color:?}").color(color),
-            color_sliders,
-        ]
-        .padding(20)
-        .spacing(20);
-
-        Self::container("Text")
-            .push(
-                "Text is probably the most essential widget for your UI. \
-                 It will try to adapt to the dimensions of its container.",
-            )
-            .push(size_section)
-            .push(color_section)
-    }
-
-    fn radio(&self) -> Column<Message> {
-        let question = column![
-            text("Iced is written in...").size(24),
-            column(
-                Language::all()
-                    .iter()
-                    .copied()
-                    .map(|language| {
-                        radio(language, language, self.language, Message::LanguageSelected)
-                    })
-                    .map(Element::from)
-            )
-            .spacing(10)
-        ]
-        .padding(20)
-        .spacing(10);
-
-        Self::container("Radio button")
-            .push(
-                "A radio button is normally used to represent a choice... \
-                 Surprise test!",
-            )
-            .push(question)
-            .push(
-                "Iced works very well with iterators! The list above is \
-                 basically created by folding a column over the different \
-                 choices, creating a radio button for each one of them!",
-            )
-    }
-
-    fn toggler(&self) -> Column<Message> {
-        Self::container("Toggler")
-            .push("A toggler is mostly used to enable or disable something.")
-            .push(
-                Container::new(
-                    toggler(self.toggler)
-                        .label("Toggle me to continue...")
-                        .on_toggle(Message::TogglerChanged),
-                )
-                .padding([0, 40]),
-            )
-    }
-
-    fn image(&self) -> Column<Message> {
-        let width = self.image_width;
-        let filter_method = self.image_filter_method;
-
-        Self::container("Image")
-            .push("An image that tries to keep its aspect ratio.")
-            .push(ferris(width, filter_method))
-            .push(slider(100..=500, width, Message::ImageWidthChanged))
-            .push(text!("Width: {width} px").width(Fill).align_x(Center))
-            .push(
-                checkbox(
-                    "Use nearest interpolation",
-                    filter_method == image::FilterMethod::Nearest,
-                )
-                .on_toggle(Message::ImageUseNearestToggled),
-            )
-            .align_x(Center)
-    }
-
-    fn scrollable(&self) -> Column<Message> {
-        Self::container("Scrollable")
-            .push(
-                "Iced supports scrollable content. Try it out! Find the \
-                 button further below.",
-            )
-            .push(text("Tip: You can use the scrollbar to scroll down faster!").size(16))
-            .push(vertical_space().height(4096))
-            .push(
-                text("You are halfway there!")
-                    .width(Fill)
-                    .size(30)
-                    .align_x(Center),
-            )
-            .push(vertical_space().height(4096))
-            .push(ferris(300, image::FilterMethod::Linear))
-            .push(text("You made it!").width(Fill).size(50).align_x(Center))
-    }
-
-    fn text_input(&self) -> Column<Message> {
-        let value = &self.input_value;
-        let is_secure = self.input_is_secure;
-        let is_showing_icon = self.input_is_showing_icon;
-
-        let mut text_input = text_input("Type something to continue...", value)
-            .on_input(Message::InputChanged)
-            .padding(10)
-            .size(30);
-
-        if is_showing_icon {
-            text_input = text_input.icon(text_input::Icon {
-                font: Font::default(),
-                code_point: '🚀',
-                size: Some(Pixels(28.0)),
-                spacing: 10.0,
-                side: text_input::Side::Right,
-            });
-        }
-
-        Self::container("Text input")
-            .push("Use a text input to ask for different kinds of information.")
-            .push(text_input.secure(is_secure))
-            .push(checkbox("Enable password mode", is_secure).on_toggle(Message::ToggleSecureInput))
-            .push(checkbox("Show icon", is_showing_icon).on_toggle(Message::ToggleTextInputIcon))
-            .push(
-                "A text input produces a message every time it changes. It is \
-                 very easy to keep track of its contents:",
-            )
-            .push(
-                text(if value.is_empty() {
-                    "You have not typed anything yet..."
-                } else {
-                    value
-                })
-                .width(Fill)
-                .align_x(Center),
-            )
-    }
-
-    fn debugger(&self) -> Column<Message> {
-        Self::container("Debugger")
-            .push(
-                "You can ask Iced to visually explain the layouting of the \
-                 different elements comprising your UI!",
-            )
-            .push(
-                "Give it a shot! Check the following checkbox to be able to \
-                 see element boundaries.",
-            )
-            .push(checkbox("Explain layout", self.debug).on_toggle(Message::DebugToggled))
-            .push("Feel free to go back and take a look.")
-    }
-
-    fn end(&self) -> Column<Message> {
-        Self::container("You reached the end!")
-            .push("This tour will be updated as more features are added.")
-            .push("Make sure to keep an eye on it!")
-    }
-
-    fn container(title: &str) -> Column<'_, Message> {
-        column![text(title).size(50)].spacing(20)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Screen {
-    Welcome,
-    Slider,
-    RowsAndColumns,
-    Text,
-    Radio,
-    Toggler,
-    Image,
-    Scrollable,
-    TextInput,
-    Debugger,
-    End,
-}
-
-impl Screen {
-    const ALL: &'static [Self] = &[
-        Self::Welcome,
-        Self::Slider,
-        Self::RowsAndColumns,
-        Self::Text,
-        Self::Radio,
-        Self::Toggler,
-        Self::Image,
-        Self::Scrollable,
-        Self::TextInput,
-        Self::Debugger,
-        Self::End,
-    ];
-
-    pub fn next(self) -> Option<Screen> {
-        Self::ALL
-            .get(
-                Self::ALL
-                    .iter()
-                    .copied()
-                    .position(|screen| screen == self)
-                    .expect("Screen must exist")
-                    + 1,
-            )
-            .copied()
-    }
-
-    pub fn previous(self) -> Option<Screen> {
-        let position = Self::ALL
-            .iter()
-            .copied()
-            .position(|screen| screen == self)
-            .expect("Screen must exist");
-
-        if position > 0 {
-            Some(Self::ALL[position - 1])
-        } else {
-            None
-        }
-    }
-}
-
-fn ferris<'a>(width: u16, filter_method: image::FilterMethod) -> Container<'a, Message> {
-    container(
-        image("/home/volfmatej/Pictures/amanita_wp.jpg")
-            .filter_method(filter_method)
-            .width(width),
-    )
-    .center_x(Fill)
-}
-
-fn padded_button<Message: Clone>(label: &str) -> Button<'_, Message> {
-    button(text(label)).padding([12, 24])
-}
-
-fn color_slider<'a>(
-    component: f32,
-    update: impl Fn(f32) -> Color + 'a,
-) -> Slider<'a, f64, Message> {
-    slider(0.0..=1.0, f64::from(component), move |c| {
-        Message::TextColorChanged(update(c as f32))
-    })
-    .step(0.01)
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Language {
-    Rust,
-    Elm,
-    Ruby,
-    Haskell,
-    C,
-    Other,
-}
-
-impl Language {
-    fn all() -> [Language; 6] {
-        [
-            Language::C,
-            Language::Elm,
-            Language::Ruby,
-            Language::Haskell,
-            Language::Rust,
-            Language::Other,
-        ]
-    }
-}
-
-impl From<Language> for String {
-    fn from(language: Language) -> String {
-        String::from(match language {
-            Language::Rust => "Rust",
-            Language::Elm => "Elm",
-            Language::Ruby => "Ruby",
-            Language::Haskell => "Haskell",
-            Language::C => "C",
-            Language::Other => "Other",
+    fn chooser_button(&self, label: String, msg: Message) -> Element<Message> {
+        container(
+            button(text(label).font(Font::MONOSPACE))
+                .on_press(msg)
+                .width(Length::Fill)
+                .padding(Padding::new(3.0).left(10))
+                .style(|_, status| Style {
+                    background: match status {
+                        button::Status::Hovered => {
+                            Some(Background::Color(Color::from_rgb8(200, 200, 255)))
+                        }
+                        _ => None,
+                    },
+                    border: border::color(Color::BLACK).width(1),
+                    text_color: Color::BLACK,
+                    shadow: Shadow::default(),
+                }),
+        )
+        .padding(Padding {
+            left: 20.0,
+            ..Default::default()
         })
+        .into()
     }
-}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Layout {
-    Row,
-    Column,
-}
+    fn image_chooser(
+        &self,
+        folder: &Path,
+        items: &[FolderItem],
+        message: Option<String>,
+    ) -> Element<Message> {
+        let msg = match message {
+            Some(msg) => text(msg).color(Color::from_rgb8(255, 0, 0)),
+            None => text(DEFAULT_MSG),
+        };
+        column![
+            msg,
+            text(folder.to_string_lossy().into_owned()).font(Font::MONOSPACE),
+            self.chooser_button("..".to_owned(), Message::SubfolderUp),
+            scrollable(items.into_iter().fold(column([]), |column, entry| {
+                let name = entry.name.clone();
+                column.push(if entry.is_dir {
+                    self.chooser_button(
+                        format!("{name}/"),
+                        Message::SubfolderSelected(name.clone()),
+                    )
+                } else {
+                    self.chooser_button(name.clone(), Message::ImageSelected(name.clone()))
+                })
+            }))
+        ]
+        .padding(10.0)
+        .into()
+    }
 
-impl Default for Tour {
-    fn default() -> Self {
+    fn image_viewer(
+        &self,
+        ImageInfo {
+            width,
+            height,
+            bytes,
+            name,
+            zoom,
+            ..
+        }: &ImageInfo,
+    ) -> Element<Message> {
+        let max_width = 2000.0;
+        let max_height = 2000.0;
+        let max_zoom = (10.0_f32)
+            .minimum(max_width / *width as f32)
+            .minimum(max_height / *height as f32);
+        let header = row![
+            text(name.to_owned()).font(Font::MONOSPACE),
+            slider(0.1..=max_zoom, *zoom, |z| Message::ZoomChanged(z)).step(0.1),
+            text(format!("Zoom: {:.1}x", zoom)).font(Font::MONOSPACE),
+            button("Close image")
+                .on_press(Message::ImageClosed)
+                .padding(3.0),
+        ]
+        .padding(10.0)
+        .spacing(5.0);
+        let img = container(
+            iced_image(iced_image::Handle::from_rgba(
+                (*width as f32 * zoom) as u32,
+                (*height as f32 * zoom) as u32,
+                // this is a cheap copy
+                bytes.clone(),
+            ))
+            .content_fit(ContentFit::None),
+        )
+        .center(Length::Fill);
+        column![header, img,].into()
+    }
+
+    pub fn new(image: Option<impl AsRef<Path>>) -> Self {
         Self {
-            screen: Screen::Welcome,
-            slider: 50,
-            layout: Layout::Row,
-            spacing: 20,
-            text_size: 30,
-            text_color: Color::BLACK,
-            language: None,
-            toggler: false,
-            image_width: 300,
-            image_filter_method: image::FilterMethod::Linear,
-            input_value: String::new(),
-            input_is_secure: false,
-            input_is_showing_icon: false,
-            debug: false,
+            state: match image {
+                Some(image) => match load_image(image.as_ref()) {
+                    Ok(image) => State::ViewingImage(image),
+                    Err(e) => {
+                        let folder = image.as_ref().parent().unwrap_or(Path::new("/"));
+                        State::ChoosingImage {
+                            folder: folder.to_path_buf(),
+                            items: list_folder(folder),
+                            message: Some(e),
+                        }
+                    }
+                },
+                None => {
+                    let folder = PathBuf::from("/");
+                    State::ChoosingImage {
+                        items: list_folder(&folder),
+                        folder,
+                        message: None,
+                    }
+                }
+            },
         }
     }
 }
