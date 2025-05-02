@@ -94,12 +94,8 @@ impl AppInner {
             },
             w.clone(),
         );
-        compositor.load_font(Cow::Borrowed(include_bytes!(
-            "/tmp/Noto_Sans/static/NotoSans-Regular.ttf"
-        )));
-        compositor.load_font(Cow::Borrowed(include_bytes!(
-            "/tmp/Noto_Sans_Mono/static/NotoSansMono-Regular.ttf"
-        )));
+        compositor.load_font(Cow::Borrowed(include_bytes!("../NotoSans-Regular.ttf")));
+        compositor.load_font(Cow::Borrowed(include_bytes!("../NotoSansMono-Regular.ttf")));
 
         let mut renderer = compositor.create_renderer();
         let mut debug = Debug::new();

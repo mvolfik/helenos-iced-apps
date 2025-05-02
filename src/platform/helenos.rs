@@ -105,7 +105,8 @@ unsafe extern "C" fn pos_event(
     let mut app = app.lock().unwrap();
     let ev = match ev.type_ {
         Evt::POS_UPDATE => {
-            let app_rect = pointer_init(|p|unsafe {helenos_ui::ui_window_get_app_rect(window, p)}).unwrap();
+            let app_rect =
+                pointer_init(|p| unsafe { helenos_ui::ui_window_get_app_rect(window, p) }).unwrap();
             let p = Point {
                 x: (ev.hpos as i32 - app_rect.p0.x) as f32,
                 y: (ev.vpos as i32 - app_rect.p0.y) as f32,
