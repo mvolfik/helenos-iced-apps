@@ -12,6 +12,7 @@ iced_tiny_skia = {git = "https://github.com/mvolfik/iced.git", branch="helenos",
 iced_widget = {git = "https://github.com/mvolfik/iced.git", branch="helenos", features = ["image"]}
 image = "0.24.9"
 raw-window-handle = "*"
+softbuffer = "*"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 winit = "0.30.9"

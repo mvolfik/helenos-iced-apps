@@ -1082,6 +1082,7 @@ dependencies = [
  "image",
  "raw-window-handle",
  "serde_json",
+ "softbuffer",
  "winit",
 ]
 
