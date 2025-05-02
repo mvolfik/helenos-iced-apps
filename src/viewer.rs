@@ -1,10 +1,11 @@
 use std::path::{Path, PathBuf};
 
 use bytes::Bytes;
-use iced_widget::button::Style;
 use iced_widget::core::{Background, Color, ContentFit, Length, Padding, Shadow, border, font};
 use iced_widget::runtime::{Program, Task};
-use iced_widget::{button, column, container, image as iced_image, row, scrollable, slider, text};
+use iced_widget::{
+    button, column, container, image as iced_image, row, scrollable, slider, stack, text,
+};
 use image::{EncodableLayout, RgbaImage};
 
 use crate::Element;
@@ -207,7 +208,7 @@ impl Viewer {
                 .on_press(msg)
                 .width(Length::Fill)
                 .padding(Padding::new(3.0).left(10))
-                .style(|_, status| Style {
+                .style(|_, status| button::Style {
                     background: match status {
                         button::Status::Hovered => {
                             Some(Background::Color(Color::from_rgb8(200, 200, 255)))
@@ -271,28 +272,41 @@ impl Viewer {
         let max_height = 800.0;
         let max_zoom = (2.0_f32)
             .minimum(max_width / *width as f32)
-            .minimum(max_height / *height as f32);
-        let header = row![
-            text(name.to_owned()).font(MONOSPACE),
-            slider(0.05..=max_zoom, *zoom, |z| Message::ZoomChanged(z)).step(0.05),
-            text(format!("Zoom: {:.2}x", zoom)).font(MONOSPACE),
-            button("Close image")
-                .on_press(Message::ImageClosed)
-                .padding(3.0),
-        ]
-        .padding(10.0)
-        .spacing(5.0);
+            .minimum(max_height / *height as f32)
+            .maximum(1.0);
+        let header = container(
+            row![
+                text(name.to_owned()).font(MONOSPACE),
+                slider(0.05..=max_zoom, *zoom, |z| Message::ZoomChanged(z)).step(0.05),
+                text(format!("Zoom: {:.2}x", zoom)).font(MONOSPACE),
+                button("Close image")
+                    .on_press(Message::ImageClosed)
+                    .padding(3.0),
+            ]
+            .padding(10.0)
+            .spacing(5.0),
+        )
+        .style(|_| container::Style {
+            background: Some(Background::Color(Color::WHITE)),
+            ..Default::default()
+        });
         let img = container(
-            iced_image(iced_image::Handle::from_rgba(
-                (*width as f32 * zoom) as u32,
-                (*height as f32 * zoom) as u32,
-                // this is a cheap copy
-                bytes.clone(),
-            ))
-            .content_fit(ContentFit::None),
+            scrollable(
+                iced_image(iced_image::Handle::from_rgba(
+                    (*width as f32 * zoom) as u32,
+                    (*height as f32 * zoom) as u32,
+                    // this is a cheap copy
+                    bytes.clone(),
+                ))
+                .content_fit(ContentFit::None),
+            )
+            .direction(scrollable::Direction::Both {
+                vertical: scrollable::Scrollbar::new(),
+                horizontal: scrollable::Scrollbar::new(),
+            }),
         )
         .center(Length::Fill);
-        column![header, img,].into()
+        stack![img, header].into()
     }
 
     pub fn new(image: Option<impl AsRef<Path>>) -> Self {

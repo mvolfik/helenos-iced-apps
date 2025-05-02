@@ -3,16 +3,17 @@
 #![feature(float_minimum_maximum)]
 
 use std::borrow::Cow;
+use std::fmt::Debug;
 use std::sync::Arc;
 
+use iced_runtime::Program;
 use iced_tiny_skia::Settings;
-use iced_widget::Theme;
 use iced_widget::core::mouse::Cursor;
 use iced_widget::core::renderer::Style;
 use iced_widget::core::{Color, Event, Pixels, Size, clipboard, font};
 use iced_widget::graphics::{Compositor, Viewport};
-use iced_widget::runtime::Debug;
 use iced_widget::runtime::program::State;
+use iced_widget::{Renderer, Theme};
 
 mod viewer;
 
@@ -28,20 +29,22 @@ mod platform {
     pub use helenos::*;
 }
 
-pub type Element<'a, M> =
-    iced_widget::core::Element<'a, M, iced_widget::core::Theme, iced_widget::renderer::Renderer>;
+pub type Element<'a, M> = iced_widget::core::Element<'a, M, Theme, Renderer>;
 
-struct AppInner {
+struct AppInner<T: Program + 'static> {
     w: Arc<platform::Window>,
     surface: iced_tiny_skia::window::Surface,
     compositor: iced_tiny_skia::window::Compositor,
-    renderer: iced_tiny_skia::Renderer,
+    renderer: Renderer,
 
-    program: State<viewer::Viewer>,
-    debug: Debug,
+    program: State<T>,
+    debug: iced_widget::runtime::Debug,
 }
 
-impl std::fmt::Debug for AppInner {
+impl<T> Debug for AppInner<T>
+where
+    T: Debug + Program<Theme = Theme, Renderer = Renderer> + 'static,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AppInner")
             .field("w", &self.w)
@@ -50,7 +53,10 @@ impl std::fmt::Debug for AppInner {
     }
 }
 
-impl AppInner {
+impl<T> AppInner<T>
+where
+    T: Debug + Program<Renderer = Renderer, Theme = Theme> + 'static,
+{
     fn update(&mut self, cursor: Cursor, events: Vec<Event>) {
         let s = self.w.inner_size();
 
@@ -83,7 +89,7 @@ impl AppInner {
             .unwrap();
     }
 
-    fn new(w: Arc<platform::Window>) -> Self {
+    fn new(w: Arc<platform::Window>, create_app: impl FnOnce() -> T) -> Self {
         let mut compositor = iced_tiny_skia::window::compositor::new(
             Settings {
                 default_font: font::Font {
@@ -98,13 +104,13 @@ impl AppInner {
         compositor.load_font(Cow::Borrowed(include_bytes!("../NotoSansMono-Regular.ttf")));
 
         let mut renderer = compositor.create_renderer();
-        let mut debug = Debug::new();
+        let mut debug = iced_widget::runtime::Debug::new();
         Self {
             surface: compositor.create_surface(w.clone(), 300, 200),
             compositor,
             w,
             program: State::new(
-                crate::viewer::Viewer::new(std::env::args().nth(1)),
+                create_app(),
                 Size::new(300.0, 200.0),
                 &mut renderer,
                 &mut debug,
@@ -116,5 +122,8 @@ impl AppInner {
 }
 
 fn main() {
-    platform::main();
+    platform::main(
+        || viewer::Viewer::new(std::env::args().nth(1)),
+        "Image viewer.rs",
+    );
 }

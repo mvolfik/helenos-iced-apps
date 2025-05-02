@@ -1,8 +1,11 @@
+use std::fmt::Debug;
 use std::mem;
 use std::sync::Arc;
 
+use iced_runtime::Program;
 use iced_widget::core::mouse::{self, Cursor, Interaction};
 use iced_widget::core::{Event, Point, keyboard};
+use iced_widget::{Renderer, Theme};
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, EventLoop};
@@ -12,17 +15,31 @@ pub use winit::window::Window;
 
 use crate::AppInner;
 
-pub struct App {
-    inner: Option<AppInner>,
+pub struct App<T>
+where
+    T: Debug + Program<Theme = Theme, Renderer = Renderer> + 'static,
+{
+    inner: Option<AppInner<T>>,
     cursor: Cursor,
     events_cache: Vec<Event>,
+    create_app: Option<Box<dyn FnOnce() -> T>>,
+    caption: &'static str,
 }
 
-impl ApplicationHandler for App {
+impl<T> ApplicationHandler for App<T>
+where
+    T: Debug + Program<Theme = Theme, Renderer = Renderer> + 'static,
+{
     fn resumed(&mut self, el: &ActiveEventLoop) {
-        self.inner = Some(AppInner::new(Arc::new(
-            el.create_window(Window::default_attributes()).unwrap(),
-        )));
+        if let Some(create_app) = self.create_app.take() {
+            self.inner = Some(AppInner::new(
+                Arc::new(
+                    el.create_window(Window::default_attributes().with_title(self.caption))
+                        .unwrap(),
+                ),
+                create_app,
+            ));
+        }
         self.inner
             .as_mut()
             .unwrap()
@@ -119,13 +136,18 @@ pub fn set_cursor(w: &Window, interaction: Interaction) {
     }));
 }
 
-pub fn main() {
+pub fn main<T>(f: impl FnOnce() -> T + 'static, caption: &'static str)
+where
+    T: Debug + Program<Theme = Theme, Renderer = Renderer> + 'static,
+{
     let el = EventLoop::new().unwrap();
 
     el.run_app(&mut App {
         inner: None,
         cursor: Cursor::Unavailable,
         events_cache: Vec::new(),
+        create_app: Some(Box::new(f)),
+        caption,
     })
     .unwrap();
 }

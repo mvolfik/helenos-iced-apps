@@ -1,14 +1,14 @@
-use std::{
-    ffi, mem,
-    ptr::NonNull,
-    sync::{Arc, Mutex},
-};
+use std::ffi::{self, CString};
+use std::fmt::Debug;
+use std::mem;
+use std::ptr::NonNull;
+use std::sync::{Arc, Mutex};
 
 use helenos_ui::util::pointer_init;
-use iced_widget::core::{
-    Event, Point,
-    mouse::{self, Cursor, Interaction},
-};
+use iced_runtime::Program;
+use iced_widget::core::mouse::{self, Cursor, Interaction};
+use iced_widget::core::{Event, Point};
+use iced_widget::{Renderer, Theme};
 use raw_window_handle::{
     DisplayHandle, HasDisplayHandle, HasWindowHandle, HelenOSDisplayHandle, HelenOSWindowHandle,
     RawDisplayHandle, RawWindowHandle, WindowHandle,
@@ -78,69 +78,11 @@ pub fn set_cursor(w: &Window, interaction: Interaction) {
     unsafe { helenos_ui::ui_window_set_ctl_cursor(w.raw.as_ptr(), curs) };
 }
 
-static CALLBACKS: helenos_ui::ui_window_cb_t = helenos_ui::ui_window_cb_t {
-    sysmenu: None,
-    minimize: None,
-    maximize: None,
-    unmaximize: None,
-    resize: None,
-    close: Some(close_event),
-    focus: None,
-    kbd: None,
-    paint: Some(paint_event),
-    pos: Some(pos_event),
-    unfocus: None,
-};
-
-type Arg = Mutex<App>;
-
-unsafe extern "C" fn pos_event(
-    window: *mut helenos_ui::ui_window_t,
-    app: *mut ffi::c_void,
-    ev: *mut helenos_ui::pos_event_t,
-) {
-    type Evt = helenos_ui::pos_event_type_t;
-    let app = unsafe { &*(app as *const Arg) };
-    let ev = unsafe { &*ev };
-    let mut app = app.lock().unwrap();
-    let ev = match ev.type_ {
-        Evt::POS_UPDATE => {
-            let app_rect =
-                pointer_init(|p| unsafe { helenos_ui::ui_window_get_app_rect(window, p) }).unwrap();
-            let p = Point {
-                x: (ev.hpos as i32 - app_rect.p0.x) as f32,
-                y: (ev.vpos as i32 - app_rect.p0.y) as f32,
-            };
-            app.cursor = Cursor::Available(p);
-            mouse::Event::CursorMoved { position: p }
-        }
-        Evt::POS_PRESS => mouse::Event::ButtonPressed(mouse::Button::Left),
-        Evt::POS_RELEASE => mouse::Event::ButtonReleased(mouse::Button::Left),
-        _ => {
-            return;
-        }
-    };
-    app.events_cache.push(Event::Mouse(ev));
-}
-
-unsafe extern "C" fn close_event(_window: *mut helenos_ui::ui_window_t, app: *mut ffi::c_void) {
-    let app = unsafe { &*(app as *const Arg) };
-    let app = &mut *app.lock().unwrap();
-    app.quit = true;
-}
-
-unsafe extern "C" fn paint_event(
-    _window: *mut helenos_ui::ui_window_t,
-    app: *mut ffi::c_void,
-) -> i32 {
-    let app = unsafe { &*(app as *const Arg) };
-    let app = &mut *app.lock().unwrap();
-    app.paint();
-    0 // EOK
-}
-
-struct App {
-    inner: AppInner,
+struct App<T>
+where
+    T: Debug + Program<Theme = Theme, Renderer = Renderer> + 'static,
+{
+    inner: AppInner<T>,
     quit: bool,
     window: Arc<Window>,
     _pin: std::marker::PhantomPinned,
@@ -149,7 +91,10 @@ struct App {
     events_cache: Vec<Event>,
 }
 
-impl std::fmt::Debug for App {
+impl<T> std::fmt::Debug for App<T>
+where
+    T: Debug + Program<Theme = Theme, Renderer = Renderer> + 'static,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("App")
             .field("quit", &self.quit)
@@ -158,7 +103,81 @@ impl std::fmt::Debug for App {
     }
 }
 
-impl App {
+trait CallbacksProvider {
+    const CALLBACKS: helenos_ui::ui_window_cb_t;
+}
+
+impl<T> CallbacksProvider for App<T>
+where
+    T: Debug + Program<Theme = Theme, Renderer = Renderer> + 'static,
+{
+    const CALLBACKS: helenos_ui::ui_window_cb_t = helenos_ui::ui_window_cb_t {
+        sysmenu: None,
+        minimize: None,
+        maximize: None,
+        unmaximize: None,
+        resize: None,
+        close: Some(Self::close_event),
+        focus: None,
+        kbd: None,
+        paint: Some(Self::paint_event),
+        pos: Some(Self::pos_event),
+        unfocus: None,
+    };
+}
+
+type Arg<T> = Mutex<App<T>>;
+
+impl<T> App<T>
+where
+    T: Debug + Program<Theme = Theme, Renderer = Renderer> + 'static,
+{
+    unsafe extern "C" fn pos_event(
+        window: *mut helenos_ui::ui_window_t,
+        app: *mut ffi::c_void,
+        ev: *mut helenos_ui::pos_event_t,
+    ) {
+        type Evt = helenos_ui::pos_event_type_t;
+        let app = unsafe { &*(app as *const Arg<T>) };
+        let ev = unsafe { &*ev };
+        let mut app = app.lock().unwrap();
+        let ev = match ev.type_ {
+            Evt::POS_UPDATE => {
+                let app_rect =
+                    pointer_init(|p| unsafe { helenos_ui::ui_window_get_app_rect(window, p) })
+                        .unwrap();
+                let p = Point {
+                    x: (ev.hpos as i32 - app_rect.p0.x) as f32,
+                    y: (ev.vpos as i32 - app_rect.p0.y) as f32,
+                };
+                app.cursor = Cursor::Available(p);
+                mouse::Event::CursorMoved { position: p }
+            }
+            Evt::POS_PRESS => mouse::Event::ButtonPressed(mouse::Button::Left),
+            Evt::POS_RELEASE => mouse::Event::ButtonReleased(mouse::Button::Left),
+            _ => {
+                return;
+            }
+        };
+        app.events_cache.push(Event::Mouse(ev));
+    }
+
+    unsafe extern "C" fn close_event(_window: *mut helenos_ui::ui_window_t, app: *mut ffi::c_void) {
+        let app = unsafe { &*(app as *const Arg<T>) };
+        let app = &mut *app.lock().unwrap();
+        app.quit = true;
+    }
+
+    unsafe extern "C" fn paint_event(
+        _window: *mut helenos_ui::ui_window_t,
+        app: *mut ffi::c_void,
+    ) -> i32 {
+        let app = unsafe { &*(app as *const Arg<T>) };
+        let app = &mut *app.lock().unwrap();
+        app.paint();
+        0 // EOK
+    }
+
     fn paint(&mut self) {
         self.inner
             .update(self.cursor, mem::take(&mut self.events_cache));
@@ -166,7 +185,10 @@ impl App {
     }
 }
 
-pub fn main() {
+pub fn main<T>(create_app: impl FnOnce() -> T, caption: &str)
+where
+    T: Debug + Program<Theme = Theme, Renderer = Renderer> + 'static,
+{
     unsafe {
         let ui = pointer_init(|ptr| {
             helenos_ui::ui_create(helenos_ui::UI_DISPLAY_DEFAULT.as_ptr() as *const _, ptr)
@@ -196,23 +218,30 @@ pub fn main() {
 
         wndparams.min_size.x = 100;
         wndparams.min_size.y = 100;
-        wndparams.caption = c"Image viewer.rs".as_ptr();
+        let string = CString::new(caption).unwrap();
+        wndparams.caption = string.as_ptr();
 
         let window = pointer_init(|ptr| helenos_ui::ui_window_create(ui, &mut wndparams, ptr))
             .expect("Failed to create window");
 
-        run_app_in_window(Window {
-            raw: NonNull::new(window).unwrap(),
-        });
+        run_app_in_window(
+            Window {
+                raw: NonNull::new(window).unwrap(),
+            },
+            create_app,
+        );
         helenos_ui::ui_destroy(ui);
     }
 }
 
-fn run_app_in_window(window: Window) {
+fn run_app_in_window<T>(window: Window, create_app: impl FnOnce() -> T)
+where
+    T: Debug + Program<Theme = Theme, Renderer = Renderer> + 'static,
+{
     let arc = Arc::new(window);
     let app = std::pin::pin!(Mutex::new(App {
         window: arc.clone(),
-        inner: AppInner::new(arc.clone()),
+        inner: AppInner::new(arc.clone(), create_app),
         quit: false,
         _pin: std::marker::PhantomPinned,
 
@@ -220,12 +249,15 @@ fn run_app_in_window(window: Window) {
         events_cache: Vec::new(),
     }),);
     let app = app.into_ref();
+    let callbacks = std::pin::pin!(App::<T>::CALLBACKS);
+    let callbacks = callbacks.into_ref();
 
     unsafe {
         helenos_ui::ui_window_set_cb(
             arc.raw.as_ptr(),
-            &CALLBACKS as *const helenos_ui::ui_window_cb_t as *mut helenos_ui::ui_window_cb_t,
-            app.as_ref().get_ref() as *const Arg as *mut ffi::c_void,
+            callbacks.get_ref() as *const helenos_ui::ui_window_cb_t
+                as *mut helenos_ui::ui_window_cb_t,
+            app.as_ref().get_ref() as *const Arg<T> as *mut ffi::c_void,
         );
         helenos_ui::ui_window_paint(arc.raw.as_ptr());
     }
