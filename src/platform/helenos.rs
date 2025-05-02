@@ -1,8 +1,7 @@
 use std::{
     ffi, mem,
-    num::NonZero,
     ptr::NonNull,
-    sync::{Arc, Condvar, Mutex},
+    sync::{Arc, Mutex},
 };
 
 use helenos_ui::util::pointer_init;
@@ -70,23 +69,13 @@ impl Window {
     }
 }
 
-pub fn set_cursor(w: &Window, interaction: Interaction) {}
-
-static CONTROL_CALLBACKS: helenos_ui::ui_control_ops_t = helenos_ui::ui_control_ops_t {
-    destroy: None,
-    paint: Some(paint_event),
-    kbd_event: None,
-    pos_event: None,
-    unfocus: None,
-};
-
-unsafe extern "C" fn paint_event(app: *mut ffi::c_void) -> i32 {
-    println!("paint_event");
-    let (app, _) = unsafe { &*(app as *const Arg) };
-    let app = &mut *app.lock().unwrap();
-    app.paint();
-    println!("paint_event done");
-    0 // EOK
+pub fn set_cursor(w: &Window, interaction: Interaction) {
+    let curs = match interaction {
+        Interaction::Pointer => helenos_ui::ui_stock_cursor_t::ui_curs_pointer,
+        Interaction::Text => helenos_ui::ui_stock_cursor_t::ui_curs_ibeam,
+        _ => helenos_ui::ui_stock_cursor_t::ui_curs_arrow,
+    };
+    unsafe { helenos_ui::ui_window_set_ctl_cursor(w.raw.as_ptr(), curs) };
 }
 
 static CALLBACKS: helenos_ui::ui_window_cb_t = helenos_ui::ui_window_cb_t {
@@ -94,42 +83,39 @@ static CALLBACKS: helenos_ui::ui_window_cb_t = helenos_ui::ui_window_cb_t {
     minimize: None,
     maximize: None,
     unmaximize: None,
-    resize: Some(resize_event),
+    resize: None,
     close: Some(close_event),
     focus: None,
     kbd: None,
-    paint: None,
+    paint: Some(paint_event),
     pos: Some(pos_event),
     unfocus: None,
 };
 
-type Arg = (Mutex<App>, Condvar);
+type Arg = Mutex<App>;
 
 unsafe extern "C" fn pos_event(
-    _window: *mut helenos_ui::ui_window_t,
+    window: *mut helenos_ui::ui_window_t,
     app: *mut ffi::c_void,
     ev: *mut helenos_ui::pos_event_t,
 ) {
     type Evt = helenos_ui::pos_event_type_t;
-    let (app, _) = unsafe { &*(app as *const Arg) };
+    let app = unsafe { &*(app as *const Arg) };
     let ev = unsafe { &*ev };
     let mut app = app.lock().unwrap();
     let ev = match ev.type_ {
         Evt::POS_UPDATE => {
+            let app_rect = pointer_init(|p|unsafe {helenos_ui::ui_window_get_app_rect(window, p)}).unwrap();
             let p = Point {
-                x: ev.hpos as f32,
-                y: ev.vpos as f32,
+                x: (ev.hpos as i32 - app_rect.p0.x) as f32,
+                y: (ev.vpos as i32 - app_rect.p0.y) as f32,
             };
             app.cursor = Cursor::Available(p);
             mouse::Event::CursorMoved { position: p }
         }
-        Evt::POS_PRESS => {
-            println!("Mouse pressed {:?}", ev);
-            mouse::Event::ButtonPressed(mouse::Button::Left)
-        }
+        Evt::POS_PRESS => mouse::Event::ButtonPressed(mouse::Button::Left),
         Evt::POS_RELEASE => mouse::Event::ButtonReleased(mouse::Button::Left),
-        t => {
-            println!("Unknown event type: {:?}", t);
+        _ => {
             return;
         }
     };
@@ -137,36 +123,29 @@ unsafe extern "C" fn pos_event(
 }
 
 unsafe extern "C" fn close_event(_window: *mut helenos_ui::ui_window_t, app: *mut ffi::c_void) {
-    println!("close_event");
-    let (app, condvar) = unsafe { &*(app as *const Arg) };
+    let app = unsafe { &*(app as *const Arg) };
     let app = &mut *app.lock().unwrap();
     app.quit = true;
-    condvar.notify_all();
 }
 
-unsafe extern "C" fn resize_event(window: *mut helenos_ui::ui_window_t, app: *mut ffi::c_void) {
-    let (app, _) = unsafe { &*(app as *const Arg) };
-    let mut app = app.lock().unwrap();
-    let size = app.window.inner_size();
-    app.surface
-        .resize(
-            NonZero::new(size.width).unwrap(),
-            NonZero::new(size.height).unwrap(),
-        )
-        .unwrap();
-    drop(app); // drop the lock before painting
-    unsafe { helenos_ui::ui_window_paint(window) };
+unsafe extern "C" fn paint_event(
+    _window: *mut helenos_ui::ui_window_t,
+    app: *mut ffi::c_void,
+) -> i32 {
+    let app = unsafe { &*(app as *const Arg) };
+    let app = &mut *app.lock().unwrap();
+    app.paint();
+    0 // EOK
 }
 
 struct App {
-    // inner: AppInner,
+    inner: AppInner,
     quit: bool,
     window: Arc<Window>,
     _pin: std::marker::PhantomPinned,
 
     cursor: Cursor,
     events_cache: Vec<Event>,
-    surface: softbuffer::Surface<Arc<Window>, Arc<Window>>,
 }
 
 impl std::fmt::Debug for App {
@@ -180,30 +159,9 @@ impl std::fmt::Debug for App {
 
 impl App {
     fn paint(&mut self) {
-        let size = self.window.inner_size();
-        println!("Painting... to {size:?}");
-        // self.surface
-        //     .resize(
-        //         NonZero::new(size.width).unwrap(),
-        //         NonZero::new(size.height).unwrap(),
-        //     )
-        //     .unwrap();
-        let mut buffer = self.surface.buffer_mut().unwrap();
-        for y in 0..size.height {
-            for x in 0..size.width {
-                let red = x % 255;
-                let green = y % 255;
-                let blue = (x * y) % 255;
-
-                buffer[y as usize * size.width as usize + x as usize] =
-                    blue | (green << 8) | (red << 16);
-            }
-        }
-
-        println!("render done");
-        buffer.present().unwrap();
+        self.inner
+            .update(self.cursor, mem::take(&mut self.events_cache));
         unsafe { helenos_ui::gfx_update(helenos_ui::ui_window_get_gc(self.window.raw.as_ptr())) };
-        println!("paint done");
     }
 }
 
@@ -237,15 +195,10 @@ pub fn main() {
 
         wndparams.min_size.x = 100;
         wndparams.min_size.y = 100;
-        wndparams.caption = c"Iced Application".as_ptr();
+        wndparams.caption = c"Image viewer.rs".as_ptr();
 
         let window = pointer_init(|ptr| helenos_ui::ui_window_create(ui, &mut wndparams, ptr))
             .expect("Failed to create window");
-
-        println!(
-            "windor rect: {:?}",
-            pointer_init(|ptr| { helenos_ui::ui_window_get_app_rect(window, ptr) }).unwrap()
-        );
 
         run_app_in_window(Window {
             raw: NonNull::new(window).unwrap(),
@@ -256,36 +209,18 @@ pub fn main() {
 
 fn run_app_in_window(window: Window) {
     let arc = Arc::new(window);
-    let app = std::pin::pin!((
-        Mutex::new(App {
-            window: arc.clone(),
-            // inner: AppInner::new(arc),
-            quit: false,
-            _pin: std::marker::PhantomPinned,
+    let app = std::pin::pin!(Mutex::new(App {
+        window: arc.clone(),
+        inner: AppInner::new(arc.clone()),
+        quit: false,
+        _pin: std::marker::PhantomPinned,
 
-            cursor: Cursor::Unavailable,
-            events_cache: Vec::new(),
-            surface: softbuffer::Surface::new(
-                &softbuffer::Context::new(arc.clone()).unwrap(),
-                arc.clone(),
-            )
-            .unwrap(),
-        }),
-        Condvar::new(),
-    ));
+        cursor: Cursor::Unavailable,
+        events_cache: Vec::new(),
+    }),);
     let app = app.into_ref();
 
-    let ctl = pointer_init(|p| unsafe {
-        helenos_ui::ui_control_new(
-            &CONTROL_CALLBACKS as *const helenos_ui::ui_control_ops_t
-                as *mut helenos_ui::ui_control_ops_t,
-            app.as_ref().get_ref() as *const Arg as *mut ffi::c_void,
-            p,
-        )
-    })
-    .unwrap();
     unsafe {
-        helenos_ui::ui_window_add(arc.raw.as_ptr(), ctl);
         helenos_ui::ui_window_set_cb(
             arc.raw.as_ptr(),
             &CALLBACKS as *const helenos_ui::ui_window_cb_t as *mut helenos_ui::ui_window_cb_t,
@@ -294,10 +229,20 @@ fn run_app_in_window(window: Window) {
         helenos_ui::ui_window_paint(arc.raw.as_ptr());
     }
 
-    let _guard = app
-        .1
-        .wait_while(app.0.lock().unwrap(), |app| !app.quit)
-        .unwrap();
+    loop {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let app = app.lock().unwrap();
+        if app.quit {
+            break;
+        }
+        if !app.events_cache.is_empty() {
+            // drop the lock, process events and repaint
+            drop(app);
+            unsafe {
+                helenos_ui::ui_window_paint(arc.raw.as_ptr());
+            }
+        }
+    }
 
     println!("Window closed, quitting...");
 

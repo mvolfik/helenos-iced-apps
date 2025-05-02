@@ -2,14 +2,12 @@ use std::path::{Path, PathBuf};
 
 use bytes::Bytes;
 use iced_widget::button::Style;
-use iced_widget::core::{Background, Color, ContentFit, Length, Padding, Shadow, border};
+use iced_widget::core::{Background, Color, ContentFit, Length, Padding, Shadow, border, font};
 use iced_widget::runtime::{Program, Task};
 use iced_widget::{button, column, container, image as iced_image, row, scrollable, slider, text};
 use image::{EncodableLayout, RgbaImage};
 
 use crate::Element;
-
-type Font = <iced_widget::renderer::Renderer as iced_widget::core::text::Renderer>::Font;
 
 #[derive(Debug, Clone)]
 struct ImageInfo {
@@ -53,11 +51,11 @@ enum State {
 }
 
 #[derive(Debug)]
-pub struct Tour {
+pub struct Viewer {
     state: State,
 }
 
-impl Program for Tour {
+impl Program for Viewer {
     type Message = Message;
     type Renderer = iced_widget::Renderer;
     type Theme = iced_widget::Theme;
@@ -129,8 +127,14 @@ fn load_image(path: &Path) -> Result<ImageInfo, String> {
 }
 
 const DEFAULT_MSG: &'static str = "Please select an image";
+const MONOSPACE: font::Font = font::Font {
+    family: font::Family::Name("Noto Sans Mono"),
+    weight: font::Weight::Normal,
+    stretch: font::Stretch::Normal,
+    style: font::Style::Normal,
+};
 
-impl Tour {
+impl Viewer {
     fn update(&mut self, event: Message) -> Task<Message> {
         if let State::ChoosingImage { message, .. } = &mut self.state {
             *message = None;
@@ -144,6 +148,7 @@ impl Tour {
                 },
             ) => match load_image(&folder.join(&name)) {
                 Err(e) => {
+                    eprintln!("{e}");
                     *message = Some(e);
                 }
                 Ok(image) => {
@@ -198,7 +203,7 @@ impl Tour {
 
     fn chooser_button(&self, label: String, msg: Message) -> Element<Message> {
         container(
-            button(text(label).font(Font::MONOSPACE))
+            button(text(label).font(MONOSPACE))
                 .on_press(msg)
                 .width(Length::Fill)
                 .padding(Padding::new(3.0).left(10))
@@ -233,7 +238,7 @@ impl Tour {
         };
         column![
             msg,
-            text(folder.to_string_lossy().into_owned()).font(Font::MONOSPACE),
+            text(folder.to_string_lossy().into_owned()).font(MONOSPACE),
             self.chooser_button("..".to_owned(), Message::SubfolderUp),
             scrollable(items.into_iter().fold(column([]), |column, entry| {
                 let name = entry.name.clone();
@@ -262,15 +267,15 @@ impl Tour {
             ..
         }: &ImageInfo,
     ) -> Element<Message> {
-        let max_width = 2000.0;
-        let max_height = 2000.0;
-        let max_zoom = (10.0_f32)
+        let max_width = 800.0;
+        let max_height = 800.0;
+        let max_zoom = (2.0_f32)
             .minimum(max_width / *width as f32)
             .minimum(max_height / *height as f32);
         let header = row![
-            text(name.to_owned()).font(Font::MONOSPACE),
-            slider(0.1..=max_zoom, *zoom, |z| Message::ZoomChanged(z)).step(0.1),
-            text(format!("Zoom: {:.1}x", zoom)).font(Font::MONOSPACE),
+            text(name.to_owned()).font(MONOSPACE),
+            slider(0.05..=max_zoom, *zoom, |z| Message::ZoomChanged(z)).step(0.05),
+            text(format!("Zoom: {:.1}x", zoom)).font(MONOSPACE),
             button("Close image")
                 .on_press(Message::ImageClosed)
                 .padding(3.0),
@@ -296,6 +301,7 @@ impl Tour {
                 Some(image) => match load_image(image.as_ref()) {
                     Ok(image) => State::ViewingImage(image),
                     Err(e) => {
+                        eprintln!("{e}");
                         let folder = image.as_ref().parent().unwrap_or(Path::new("/"));
                         State::ChoosingImage {
                             folder: folder.to_path_buf(),

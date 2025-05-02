@@ -2,18 +2,19 @@
 #![feature(unwrap_infallible)]
 #![feature(float_minimum_maximum)]
 
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use iced_tiny_skia::Settings;
 use iced_widget::Theme;
 use iced_widget::core::mouse::Cursor;
 use iced_widget::core::renderer::Style;
-use iced_widget::core::{Color, Event, Font, Pixels, Size, clipboard};
+use iced_widget::core::{Color, Event, Pixels, Size, clipboard, font};
 use iced_widget::graphics::{Compositor, Viewport};
 use iced_widget::runtime::Debug;
 use iced_widget::runtime::program::State;
 
-mod tour;
+mod viewer;
 
 #[cfg(not(target_os = "helenos"))]
 mod platform {
@@ -36,7 +37,7 @@ struct AppInner {
     compositor: iced_tiny_skia::window::Compositor,
     renderer: iced_tiny_skia::Renderer,
 
-    program: State<tour::Tour>,
+    program: State<viewer::Viewer>,
     debug: Debug,
 }
 
@@ -85,19 +86,29 @@ impl AppInner {
     fn new(w: Arc<platform::Window>) -> Self {
         let mut compositor = iced_tiny_skia::window::compositor::new(
             Settings {
-                default_font: Font::DEFAULT,
-                default_text_size: Pixels(16.0),
+                default_font: font::Font {
+                    family: font::Family::Name("Noto Sans"),
+                    ..Default::default()
+                },
+                default_text_size: Pixels(12.0),
             },
             w.clone(),
         );
-        let mut renderer = iced_tiny_skia::Renderer::new(Font::DEFAULT, Pixels(10.0));
+        compositor.load_font(Cow::Borrowed(include_bytes!(
+            "/tmp/Noto_Sans/static/NotoSans-Regular.ttf"
+        )));
+        compositor.load_font(Cow::Borrowed(include_bytes!(
+            "/tmp/Noto_Sans_Mono/static/NotoSansMono-Regular.ttf"
+        )));
+
+        let mut renderer = compositor.create_renderer();
         let mut debug = Debug::new();
         Self {
             surface: compositor.create_surface(w.clone(), 300, 200),
             compositor,
             w,
             program: State::new(
-                crate::tour::Tour::new(std::env::args().nth(1)),
+                crate::viewer::Viewer::new(std::env::args().nth(1)),
                 Size::new(300.0, 200.0),
                 &mut renderer,
                 &mut debug,

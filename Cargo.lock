@@ -1040,7 +1040,20 @@ dependencies = [
 
 [[package]]
 name = "helenos-ui"
-version = "0.1.1"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c9615030a20e972be017bdcfdbfa5d70a6a23830c277a942c99245d76640de4d"
+dependencies = [
+ "bindgen",
+ "cc 1.2.20",
+ "libc",
+ "serde_json",
+]
+
+[[package]]
+name = "helenos-ui"
+version = "0.1.2"
+source = "git+https://github.com/mvolfik/helenos-ui-rs.git#5a9f6749cff986be5a38ce13401859a02725bcfc"
 dependencies = [
  "bindgen",
  "cc 1.2.19",
@@ -1065,26 +1078,6 @@ name = "hexf-parse"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dfa686283ad6dd069f105e5ab091b04c62850d3e4cf5d67debad1933f55023df"
-
-[[package]]
-name = "iced-test"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bindgen",
- "bytes",
- "cc 1.2.19",
- "helenos-ui",
- "iced_renderer",
- "iced_runtime",
- "iced_tiny_skia",
- "iced_widget",
- "image",
- "raw-window-handle",
- "serde_json",
- "softbuffer",
- "winit",
-]
 
 [[package]]
 name = "iced_core"
@@ -1239,6 +1232,26 @@ dependencies = [
  "png",
  "qoi",
  "tiff",
+]
+
+[[package]]
+name = "imageviewer-rs"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bindgen",
+ "bytes",
+ "cc 1.2.19",
+ "helenos-ui 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "iced_renderer",
+ "iced_runtime",
+ "iced_tiny_skia",
+ "iced_widget",
+ "image",
+ "raw-window-handle",
+ "serde_json",
+ "softbuffer",
+ "winit",
 ]
 
 [[package]]
@@ -2556,13 +2569,14 @@ dependencies = [
 [[package]]
 name = "softbuffer"
 version = "0.4.6"
+source = "git+https://github.com/mvolfik/softbuffer.git?branch=helenos#db541a78c5f97d5ca6ca858ca3e54f19c4fed41b"
 dependencies = [
  "as-raw-xcb-connection",
  "bytemuck",
  "cfg_aliases 0.2.1",
  "drm",
  "fastrand",
- "helenos-ui",
+ "helenos-ui 0.1.2 (git+https://github.com/mvolfik/helenos-ui-rs.git)",
  "js-sys",
  "memmap2",
  "ndk",

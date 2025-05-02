@@ -1,6 +1,6 @@
 [package]
 edition = "2024"
-name = "iced-test"
+name = "imageviewer-rs"
 version = "0.1.0"
 
 [dependencies]
@@ -26,8 +26,7 @@ cc = {git = "https://github.com/mvolfik/cc-rs.git", branch = "helenos"}
 serde_json = "1.0.140"
 
 [patch.crates-io]
-softbuffer = {path = "../id/softbuffer"}
+softbuffer = {git = "https://github.com/mvolfik/softbuffer.git", branch = "helenos"}
 swash = {git = "https://github.com/mvolfik/swash.git", branch = "helenos"}
 raw-window-handle = {git = "https://github.com/mvolfik/raw-window-handle.git", branch="helenos"}
 libc = {git = "https://github.com/mvolfik/rust-libc.git", branch = "helenos-v0.2"}
-helenos-ui = {path = "../helenos-ui"}
