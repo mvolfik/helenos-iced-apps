@@ -1,8 +1,9 @@
 use std::collections::VecDeque;
 use std::fmt::Debug;
 use std::sync::mpsc::{self, TryRecvError};
-use std::sync::Mutex;
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
 
 use grid::Grid;
 use iced_runtime::Program;
@@ -14,7 +15,7 @@ use iced_widget::{button, checkbox, column, container, pick_list, row, slider, t
 mod preset;
 use preset::Preset;
 
-use crate::{Element, ProgramExt};
+use crate::{Element, ProgramExt, SendMsgFn};
 
 impl Program for GameOfLife {
     type Message = Message;
@@ -33,8 +34,13 @@ impl Program for GameOfLife {
 impl ProgramExt for GameOfLife {
     fn stop(&self) {
         self.worker_sender.send(WorkerMessage::Stop).unwrap();
-        if let Some(handle) = self.worker_handle.lock().unwrap().take() {
-            handle.join().unwrap();
+        *self.looper_state.0.lock().unwrap() = LooperState::Stop;
+        self.looper_state.1.notify_all();
+
+        if let Some(handles) = self.join_handles.lock().unwrap().take() {
+            for handle in handles {
+                handle.join().unwrap();
+            }
         }
     }
 }
@@ -44,7 +50,7 @@ enum WorkerMessage {
     Work(Box<dyn FnOnce() -> Option<Message> + Send>),
 }
 
-fn worker(worker_receiver: mpsc::Receiver<WorkerMessage>, send_msg: Box<dyn Fn(Message)>) {
+fn worker(worker_receiver: mpsc::Receiver<WorkerMessage>, send_msg: SendMsgFn<Message>) {
     let mut pending_msgs = VecDeque::new();
     loop {
         // iterate all pending messages to find if there is any stop
@@ -76,15 +82,47 @@ fn worker(worker_receiver: mpsc::Receiver<WorkerMessage>, send_msg: Box<dyn Fn(M
     }
 }
 
+#[derive(Debug)]
+enum LooperState {
+    Paused,
+    Running { speed: usize },
+    Stop,
+}
+
+fn looper(looper_state: Arc<(Mutex<LooperState>, Condvar)>, send_msg: SendMsgFn<Message>) {
+    let mut last_tick = None;
+    let (looper_state, condvar) = &*looper_state;
+    let mut state = looper_state.lock().unwrap();
+    loop {
+        let speed = match *state {
+            LooperState::Paused => {
+                state = condvar.wait(state).unwrap();
+                continue;
+            }
+            LooperState::Stop => return,
+            LooperState::Running { speed } => speed,
+        };
+        drop(state);
+        if let Some(last_tick) = last_tick {
+            std::thread::sleep_until(last_tick + Duration::from_millis(1000 / speed as u64));
+        }
+        last_tick = Some(Instant::now());
+        send_msg(Message::Tick);
+        state = looper_state.lock().unwrap();
+    }
+}
+
 pub struct GameOfLife {
     grid: Grid,
     is_playing: bool,
     queued_ticks: usize,
     speed: usize,
-    next_speed: Option<usize>,
     version: usize,
+
     worker_sender: mpsc::Sender<WorkerMessage>,
-    worker_handle: Mutex<Option<JoinHandle<()>>>,
+    looper_state: Arc<(Mutex<LooperState>, Condvar)>,
+
+    join_handles: Mutex<Option<[JoinHandle<()>; 2]>>,
 }
 
 impl Debug for GameOfLife {
@@ -93,8 +131,8 @@ impl Debug for GameOfLife {
             .field("is_playing", &self.is_playing)
             .field("queued_ticks", &self.queued_ticks)
             .field("speed", &self.speed)
-            .field("next_speed", &self.next_speed)
             .field("version", &self.version)
+            .field("looper_state", &self.looper_state)
             .finish_non_exhaustive()
     }
 }
@@ -112,21 +150,40 @@ pub enum Message {
 }
 
 impl GameOfLife {
-    pub fn new(send_msg: Box<dyn Fn(Message) + Send + 'static>) -> Self {
+    pub fn new(create_send_msg: impl Fn() -> SendMsgFn<Message>) -> Self {
         let (worker_sender, worker_receiver) = mpsc::channel();
-        let handle = std::thread::spawn(move || {
-            worker(worker_receiver, send_msg);
+        let worker_handle = std::thread::spawn({
+            let send_msg = create_send_msg();
+            move || worker(worker_receiver, send_msg)
+        });
+        let looper_state = Arc::new((Mutex::new(LooperState::Paused), Condvar::new()));
+        let looper_handle = std::thread::spawn({
+            let looper_state = looper_state.clone();
+            let send_msg = create_send_msg();
+            move || looper(looper_state, send_msg)
         });
         Self {
             grid: Grid::default(),
             is_playing: false,
             queued_ticks: 0,
             speed: 5,
-            next_speed: None,
             version: 0,
             worker_sender,
-            worker_handle: Mutex::new(Some(handle)),
+            looper_state,
+            join_handles: Mutex::new(Some([worker_handle, looper_handle])),
         }
+    }
+
+    fn update_looper_state(&mut self) {
+        let mut guard = self.looper_state.0.lock().unwrap();
+        if !matches!(*guard, LooperState::Stop) {
+            if self.is_playing {
+                *guard = LooperState::Running { speed: self.speed };
+            } else {
+                *guard = LooperState::Paused;
+            }
+        }
+        self.looper_state.1.notify_all();
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
@@ -140,10 +197,6 @@ impl GameOfLife {
                 self.queued_ticks = (self.queued_ticks + 1).min(self.speed);
 
                 if let Some(task) = self.grid.tick(self.queued_ticks) {
-                    if let Some(speed) = self.next_speed.take() {
-                        self.speed = speed;
-                    }
-
                     self.queued_ticks = 0;
 
                     let version = self.version;
@@ -157,6 +210,7 @@ impl GameOfLife {
             }
             Message::TogglePlayback => {
                 self.is_playing = !self.is_playing;
+                self.update_looper_state();
             }
             Message::ToggleGrid(show_grid_lines) => {
                 self.grid.toggle_lines(show_grid_lines);
@@ -166,10 +220,9 @@ impl GameOfLife {
                 self.version += 1;
             }
             Message::SpeedChanged(speed) => {
+                self.speed = speed.round() as usize;
                 if self.is_playing {
-                    self.next_speed = Some(speed.round() as usize);
-                } else {
-                    self.speed = speed.round() as usize;
+                    self.update_looper_state();
                 }
             }
             Message::PresetPicked(new_preset) => {

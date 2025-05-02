@@ -10,7 +10,7 @@ use winit::window::WindowId;
 
 pub use winit::window::Window;
 
-use crate::{AppInner, ProgramExt};
+use crate::{AppInner, ProgramExt, SendMsgFn};
 
 pub struct App<T: ProgramExt> {
     inner: Option<AppInner<T>>,
@@ -137,7 +137,7 @@ pub fn set_cursor(w: &Window, interaction: Interaction) {
 }
 
 pub fn main<T: ProgramExt>(
-    f: impl FnOnce(Box<dyn Fn(T::Message) + Send + 'static>) -> T + 'static,
+    f: impl FnOnce(&(dyn (Fn() -> SendMsgFn<T::Message>) + Send + 'static)) -> T + 'static,
     caption: &'static str,
 ) {
     let el = EventLoop::with_user_event().build().unwrap();
@@ -148,11 +148,14 @@ pub fn main<T: ProgramExt>(
         cursor: Cursor::Unavailable,
         events_cache: Vec::new(),
         caption,
-        prepared_app: Some(f(Box::new(move |msg| {
-            if let Err(e) = proxy.send_event(msg) {
-                eprintln!("Error sending event: {}", e);
-            }
-        }))),
+        prepared_app: Some(f(&move || {
+            let proxy = proxy.clone();
+            Box::new(move |msg: T::Message| {
+                if let Err(e) = proxy.send_event(msg) {
+                    eprintln!("Error sending event: {}", e);
+                }
+            })
+        })),
     })
     .unwrap();
 }

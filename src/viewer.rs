@@ -114,10 +114,8 @@ impl Program for Viewer {
 impl ProgramExt for Viewer {
     fn stop(&self) {
         let (lock, cvar) = &*self.worker_pair;
-        let mut guard = lock.lock().unwrap();
-        *guard = WorkerJob::Stop;
-        cvar.notify_one();
-        drop(guard);
+        *lock.lock().unwrap() = WorkerJob::Stop;
+        cvar.notify_all();
         if let Some(handle) = self.worker_handle.lock().unwrap().take() {
             handle.join().unwrap();
         }

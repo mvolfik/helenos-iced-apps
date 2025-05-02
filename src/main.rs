@@ -2,6 +2,7 @@
 #![feature(unwrap_infallible)]
 #![feature(float_minimum_maximum)]
 #![feature(debug_closure_helpers)]
+#![feature(thread_sleep_until)]
 
 use std::borrow::Cow;
 use std::fmt::Debug;
@@ -122,10 +123,12 @@ where
     }
 }
 
+pub type SendMsgFn<M> = Box<dyn Fn(M) + Send + 'static>;
+
 fn main() {
-    platform::main(|send_msg| life::GameOfLife::new(send_msg), "Game of Life");
+    platform::main(|create_send_msg| life::GameOfLife::new(create_send_msg), "Game of Life");
     platform::main(
-        |send_msg| viewer::Viewer::new(std::env::args().nth(1), send_msg),
+        |create_send_msg| viewer::Viewer::new(std::env::args().nth(1), create_send_msg()),
         "Image viewer.rs",
     );
 }
