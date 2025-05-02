@@ -275,7 +275,7 @@ impl Viewer {
         let header = row![
             text(name.to_owned()).font(MONOSPACE),
             slider(0.05..=max_zoom, *zoom, |z| Message::ZoomChanged(z)).step(0.05),
-            text(format!("Zoom: {:.1}x", zoom)).font(MONOSPACE),
+            text(format!("Zoom: {:.2}x", zoom)).font(MONOSPACE),
             button("Close image")
                 .on_press(Message::ImageClosed)
                 .padding(3.0),
