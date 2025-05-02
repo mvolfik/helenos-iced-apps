@@ -1,4 +1,6 @@
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Condvar, Mutex};
+use std::thread::JoinHandle;
 
 use bytes::Bytes;
 use iced_widget::core::{Background, Color, ContentFit, Length, Padding, Shadow, border, font};
@@ -8,16 +10,53 @@ use iced_widget::{
 };
 use image::{EncodableLayout, RgbaImage};
 
-use crate::Element;
+use crate::{Element, ProgramExt};
+
+#[derive(Debug)]
+enum WorkerJob {
+    None,
+    Resize(Arc<RgbaImage>, f32),
+    Stop,
+}
+
+fn worker(pair: Arc<(Mutex<WorkerJob>, Condvar)>, send_msg: Box<dyn Fn(Message)>) {
+    let (lock, cvar) = &*pair;
+    let mut guard = lock.lock().unwrap();
+    loop {
+        let (img, zoom) = match &*guard {
+            WorkerJob::None => {
+                guard = cvar.wait(guard).unwrap();
+                continue;
+            }
+            WorkerJob::Resize(img, zoom) => (img.clone(), *zoom),
+            WorkerJob::Stop => break,
+        };
+        *guard = WorkerJob::None;
+        drop(guard);
+        let new_img = image::imageops::resize(
+            &*img,
+            (img.width() as f32 * zoom) as u32,
+            (img.height() as f32 * zoom) as u32,
+            image::imageops::FilterType::Lanczos3,
+        )
+        .into_raw()
+        .into();
+        send_msg(Message::ResizeFinished(zoom, new_img));
+        guard = lock.lock().unwrap();
+    }
+}
 
 #[derive(Debug, Clone)]
 struct ImageInfo {
     width: u32,
     height: u32,
-    image: RgbaImage,
+    image: Arc<RgbaImage>,
     bytes: Bytes,
     name: String,
-    zoom: f32,
+    // current zoom of the image
+    current_image_zoom: f32,
+    // zoom displayed on slider, but the image is not yet resized
+    pending_zoom: f32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,6 +92,8 @@ enum State {
 
 #[derive(Debug)]
 pub struct Viewer {
+    worker_pair: Arc<(Mutex<WorkerJob>, Condvar)>,
+    worker_handle: Mutex<Option<JoinHandle<()>>>,
     state: State,
 }
 
@@ -70,6 +111,19 @@ impl Program for Viewer {
     }
 }
 
+impl ProgramExt for Viewer {
+    fn stop(&self) {
+        let (lock, cvar) = &*self.worker_pair;
+        let mut guard = lock.lock().unwrap();
+        *guard = WorkerJob::Stop;
+        cvar.notify_one();
+        drop(guard);
+        if let Some(handle) = self.worker_handle.lock().unwrap().take() {
+            handle.join().unwrap();
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Message {
     ImageClosed,
@@ -77,6 +131,7 @@ pub enum Message {
     SubfolderUp,
     ImageSelected(String),
     ZoomChanged(f32),
+    ResizeFinished(f32, Bytes),
 }
 
 fn list_folder(folder: &Path) -> Vec<FolderItem> {
@@ -116,13 +171,14 @@ fn load_image(path: &Path) -> Result<ImageInfo, String> {
     );
     let image = std::fs::read(path).map_err(|e| format!("Error reading image: {e}"))?;
     let image = image::load_from_memory(&image).map_err(|e| format!("error parsing image: {e}"))?;
-    let image = image.into_rgba8();
+    let image = Arc::new(image.into_rgba8());
     Ok(ImageInfo {
         width: image.width(),
         height: image.height(),
         bytes: Bytes::copy_from_slice(image.as_bytes()),
         image,
-        zoom: 1.0,
+        current_image_zoom: 1.0,
+        pending_zoom: 1.0,
         name,
     })
 }
@@ -174,15 +230,20 @@ impl Viewer {
                 *items = list_folder(folder);
             }
             (Message::ZoomChanged(z), State::ViewingImage(img)) => {
-                img.zoom = z;
-                img.bytes = image::imageops::resize(
-                    &img.image,
-                    (img.width as f32 * z) as u32,
-                    (img.height as f32 * z) as u32,
-                    image::imageops::FilterType::Lanczos3,
-                )
-                .into_raw()
-                .into();
+                let (lock, cvar) = &*self.worker_pair;
+                let mut guard = lock.lock().unwrap();
+                if !matches!(&*guard, WorkerJob::Stop) {
+                    *guard = WorkerJob::Resize(img.image.clone(), z);
+                    cvar.notify_one();
+                }
+                img.pending_zoom = z;
+            }
+            (Message::ResizeFinished(z, bytes), State::ViewingImage(img)) => {
+                img.current_image_zoom = z;
+                img.bytes = bytes;
+            }
+            (Message::ResizeFinished(_, _), State::ChoosingImage { .. }) => {
+                // ignore
             }
             x => {
                 eprintln!("Incorrect message: {x:?}");
@@ -264,7 +325,8 @@ impl Viewer {
             height,
             bytes,
             name,
-            zoom,
+            pending_zoom,
+            current_image_zoom,
             ..
         }: &ImageInfo,
     ) -> Element<Message> {
@@ -277,8 +339,8 @@ impl Viewer {
         let header = container(
             row![
                 text(name.to_owned()).font(MONOSPACE),
-                slider(0.05..=max_zoom, *zoom, |z| Message::ZoomChanged(z)).step(0.05),
-                text(format!("Zoom: {:.2}x", zoom)).font(MONOSPACE),
+                slider(0.05..=max_zoom, *pending_zoom, |z| Message::ZoomChanged(z)).step(0.05),
+                text(format!("Zoom: {:.2}x", pending_zoom)).font(MONOSPACE),
                 button("Close image")
                     .on_press(Message::ImageClosed)
                     .padding(3.0),
@@ -293,8 +355,8 @@ impl Viewer {
         let img = container(
             scrollable(
                 iced_image(iced_image::Handle::from_rgba(
-                    (*width as f32 * zoom) as u32,
-                    (*height as f32 * zoom) as u32,
+                    (*width as f32 * current_image_zoom) as u32,
+                    (*height as f32 * current_image_zoom) as u32,
                     // this is a cheap copy
                     bytes.clone(),
                 ))
@@ -309,8 +371,18 @@ impl Viewer {
         stack![img, header].into()
     }
 
-    pub fn new(image: Option<impl AsRef<Path>>) -> Self {
+    pub fn new(
+        image: Option<impl AsRef<Path>>,
+        send_msg: Box<dyn Fn(Message) + Send + 'static>,
+    ) -> Self {
+        let worker_pair = Arc::new((Mutex::new(WorkerJob::None), Condvar::new()));
+        let worker_handle = std::thread::spawn({
+            let pair = worker_pair.clone();
+            move || worker(pair, send_msg)
+        });
         Self {
+            worker_pair,
+            worker_handle: Mutex::new(Some(worker_handle)),
             state: match image {
                 Some(image) => match load_image(image.as_ref()) {
                     Ok(image) => State::ViewingImage(image),

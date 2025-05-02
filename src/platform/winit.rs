@@ -1,11 +1,8 @@
-use std::fmt::Debug;
 use std::mem;
 use std::sync::Arc;
 
-use iced_runtime::Program;
 use iced_widget::core::mouse::{self, Cursor, Interaction};
 use iced_widget::core::{Event, Point, keyboard};
-use iced_widget::{Renderer, Theme};
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, EventLoop};
@@ -13,37 +10,39 @@ use winit::window::WindowId;
 
 pub use winit::window::Window;
 
-use crate::AppInner;
+use crate::{AppInner, ProgramExt};
 
-pub struct App<T>
-where
-    T: Debug + Program<Theme = Theme, Renderer = Renderer> + 'static,
-{
+pub struct App<T: ProgramExt> {
     inner: Option<AppInner<T>>,
     cursor: Cursor,
     events_cache: Vec<Event>,
-    create_app: Option<Box<dyn FnOnce() -> T>>,
     caption: &'static str,
+    // app that we will run - we store it here until the first Resume event
+    prepared_app: Option<T>,
 }
 
-impl<T> ApplicationHandler for App<T>
-where
-    T: Debug + Program<Theme = Theme, Renderer = Renderer> + 'static,
-{
+impl<T: ProgramExt> ApplicationHandler<T::Message> for App<T> {
     fn resumed(&mut self, el: &ActiveEventLoop) {
-        if let Some(create_app) = self.create_app.take() {
+        if let Some(app) = self.prepared_app.take() {
             self.inner = Some(AppInner::new(
                 Arc::new(
                     el.create_window(Window::default_attributes().with_title(self.caption))
                         .unwrap(),
                 ),
-                create_app,
+                app,
             ));
         }
         self.inner
             .as_mut()
             .unwrap()
             .update(self.cursor, mem::take(&mut self.events_cache));
+    }
+
+    fn user_event(&mut self, _el: &ActiveEventLoop, msg: T::Message) {
+        if let Some(inner) = self.inner.as_mut() {
+            inner.program.queue_message(msg);
+            inner.w.request_redraw();
+        }
     }
 
     fn window_event(&mut self, el: &ActiveEventLoop, _wid: WindowId, event: WindowEvent) {
@@ -62,6 +61,7 @@ where
             }
             WindowEvent::CloseRequested => {
                 el.exit();
+                self.inner.as_mut().unwrap().program.program().stop();
             }
             WindowEvent::RedrawRequested => {
                 self.inner
@@ -136,18 +136,23 @@ pub fn set_cursor(w: &Window, interaction: Interaction) {
     }));
 }
 
-pub fn main<T>(f: impl FnOnce() -> T + 'static, caption: &'static str)
-where
-    T: Debug + Program<Theme = Theme, Renderer = Renderer> + 'static,
-{
-    let el = EventLoop::new().unwrap();
+pub fn main<T: ProgramExt>(
+    f: impl FnOnce(Box<dyn Fn(T::Message) + Send + 'static>) -> T + 'static,
+    caption: &'static str,
+) {
+    let el = EventLoop::with_user_event().build().unwrap();
+    let proxy = el.create_proxy();
 
     el.run_app(&mut App {
         inner: None,
         cursor: Cursor::Unavailable,
         events_cache: Vec::new(),
-        create_app: Some(Box::new(f)),
         caption,
+        prepared_app: Some(f(Box::new(move |msg| {
+            if let Err(e) = proxy.send_event(msg) {
+                eprintln!("Error sending event: {}", e);
+            }
+        }))),
     })
     .unwrap();
 }

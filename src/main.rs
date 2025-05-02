@@ -1,6 +1,7 @@
 #![feature(never_type)]
 #![feature(unwrap_infallible)]
 #![feature(float_minimum_maximum)]
+#![feature(debug_closure_helpers)]
 
 use std::borrow::Cow;
 use std::fmt::Debug;
@@ -15,6 +16,7 @@ use iced_widget::graphics::{Compositor, Viewport};
 use iced_widget::runtime::program::State;
 use iced_widget::{Renderer, Theme};
 
+mod life;
 mod viewer;
 
 #[cfg(not(target_os = "helenos"))]
@@ -30,6 +32,10 @@ mod platform {
 }
 
 pub type Element<'a, M> = iced_widget::core::Element<'a, M, Theme, Renderer>;
+
+trait ProgramExt: Debug + Program<Theme = Theme, Renderer = Renderer> + 'static {
+    fn stop(&self);
+}
 
 struct AppInner<T: Program + 'static> {
     w: Arc<platform::Window>,
@@ -48,7 +54,7 @@ where
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AppInner")
             .field("w", &self.w)
-            .field("program", &self.program.program())
+            .field("program", self.program.program())
             .finish_non_exhaustive()
     }
 }
@@ -89,7 +95,7 @@ where
             .unwrap();
     }
 
-    fn new(w: Arc<platform::Window>, create_app: impl FnOnce() -> T) -> Self {
+    fn new(w: Arc<platform::Window>, app: T) -> Self {
         let mut compositor = iced_tiny_skia::window::compositor::new(
             Settings {
                 default_font: font::Font {
@@ -109,12 +115,7 @@ where
             surface: compositor.create_surface(w.clone(), 300, 200),
             compositor,
             w,
-            program: State::new(
-                create_app(),
-                Size::new(300.0, 200.0),
-                &mut renderer,
-                &mut debug,
-            ),
+            program: State::new(app, Size::new(300.0, 200.0), &mut renderer, &mut debug),
             debug,
             renderer,
         }
@@ -122,8 +123,9 @@ where
 }
 
 fn main() {
+    platform::main(|send_msg| life::GameOfLife::new(send_msg), "Game of Life");
     platform::main(
-        || viewer::Viewer::new(std::env::args().nth(1)),
+        |send_msg| viewer::Viewer::new(std::env::args().nth(1), send_msg),
         "Image viewer.rs",
     );
 }

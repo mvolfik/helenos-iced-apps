@@ -9,8 +9,9 @@ bytes = "1.10.1"
 iced_renderer = {git = "https://github.com/mvolfik/iced.git", branch="helenos", features = ["image", "tiny-skia"]}
 iced_runtime = {git = "https://github.com/mvolfik/iced.git", branch="helenos"}
 iced_tiny_skia = {git = "https://github.com/mvolfik/iced.git", branch="helenos", features = ["image"]}
-iced_widget = {git = "https://github.com/mvolfik/iced.git", branch="helenos", features = ["image"]}
+iced_widget = {git = "https://github.com/mvolfik/iced.git", branch="helenos", features = ["image", "canvas"]}
 image = "0.24.9"
+itertools = "0.14.0"
 raw-window-handle = "*"
 softbuffer = "*"
 
