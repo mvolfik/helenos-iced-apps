@@ -18,7 +18,7 @@ softbuffer = "*"
 winit = "0.30.9"
 
 [target.'cfg(target_os = "helenos")'.dependencies]
-helenos-ui = "*"
+helenos-ui = {git = "https://github.com/mvolfik/helenos-ui-rs.git"}
 
 [patch.crates-io]
 softbuffer = {git = "https://github.com/mvolfik/softbuffer.git", branch = "helenos"}
