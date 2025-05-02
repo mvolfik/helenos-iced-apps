@@ -1239,9 +1239,7 @@ name = "imageviewer-rs"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "bindgen",
  "bytes",
- "cc 1.2.19",
  "helenos-ui 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "iced_renderer",
  "iced_runtime",
@@ -1249,7 +1247,6 @@ dependencies = [
  "iced_widget",
  "image",
  "raw-window-handle",
- "serde_json",
  "softbuffer",
  "winit",
 ]
