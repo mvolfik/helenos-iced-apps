@@ -8,3 +8,7 @@ Current list of applications:
 
 - `life`: Conway's game of life, from https://github.com/iced-rs/iced/blob/b1c13e285ee6009a3c547ffb12038b0ca91c4d35/examples/game_of_life/src/main.rs
 - `imageviewer-rs`: a simple image viewer with file browser included
+
+---
+
+A part of this repository are Noto fonts downloaded from https://fonts.google.com/noto . These files are licensed under the SIL Open Font License, Version 1.1, see fonts/LICENSE for more details.

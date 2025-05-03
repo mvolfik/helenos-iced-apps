@@ -100,8 +100,8 @@ where
             },
             w.clone(),
         );
-        compositor.load_font(Cow::Borrowed(include_bytes!("../NotoSans-Regular.ttf")));
-        compositor.load_font(Cow::Borrowed(include_bytes!("../NotoSansMono-Regular.ttf")));
+        compositor.load_font(Cow::Borrowed(include_bytes!("../fonts/NotoSans-Regular.ttf")));
+        compositor.load_font(Cow::Borrowed(include_bytes!("../fonts/NotoSansMono-Regular.ttf")));
 
         let mut renderer = compositor.create_renderer();
         let mut debug = iced_widget::runtime::Debug::new();
