@@ -1,5 +1,10 @@
 #![feature(thread_sleep_until)]
 
+// this application was taken from https://github.com/iced-rs/iced/blob/b1c13e285ee6009a3c547ffb12038b0ca91c4d35/examples/game_of_life/src/main.rs
+// and only small modifications were made to run Ticks in our own thread
+// Copyright 2019 Héctor Ramón, Iced contributors
+// this file is licensed under MIT license
+
 use std::borrow::Cow;
 use std::collections::VecDeque;
 use std::fmt::Debug;
