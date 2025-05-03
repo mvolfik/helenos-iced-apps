@@ -12,13 +12,10 @@ use iced_runtime::Program;
 use iced_tiny_skia::Settings;
 use iced_widget::core::mouse::Cursor;
 use iced_widget::core::renderer::Style;
-use iced_widget::core::{Color, Event, Pixels, Size, clipboard, font};
+use iced_widget::core::{Color, Pixels, Size, clipboard, font};
 use iced_widget::graphics::{Compositor, Viewport};
 use iced_widget::runtime::program::State;
 use iced_widget::{Renderer, Theme};
-
-mod life;
-mod viewer;
 
 #[cfg(not(target_os = "helenos"))]
 mod platform {
@@ -34,7 +31,7 @@ mod platform {
 
 pub type Element<'a, M> = iced_widget::core::Element<'a, M, Theme, Renderer>;
 
-trait ProgramExt: Debug + Program<Theme = Theme, Renderer = Renderer> + 'static {
+pub trait ProgramExt: Debug + Program<Theme = Theme, Renderer = Renderer> + 'static {
     fn stop(&self);
 }
 
@@ -64,12 +61,8 @@ impl<T> AppInner<T>
 where
     T: Debug + Program<Renderer = Renderer, Theme = Theme> + 'static,
 {
-    fn update(&mut self, cursor: Cursor, events: Vec<Event>) {
+    fn update(&mut self, cursor: Cursor) {
         let s = self.w.inner_size();
-
-        for e in events {
-            self.program.queue_event(e);
-        }
 
         self.program.update(
             Size::new(s.width as f32, s.height as f32),
@@ -125,10 +118,18 @@ where
 
 pub type SendMsgFn<M> = Box<dyn Fn(M) + Send + 'static>;
 
-fn main() {
-    platform::main(|create_send_msg| life::GameOfLife::new(create_send_msg), "Game of Life");
-    platform::main(
-        |create_send_msg| viewer::Viewer::new(std::env::args().nth(1), create_send_msg()),
-        "Image viewer.rs",
-    );
+pub struct WindowOptions {
+    pub caption: Cow<'static, str>,
+    pub maximized: bool,
 }
+
+impl Default for WindowOptions {
+    fn default() -> Self {
+        Self {
+            caption: Cow::Borrowed("Iced App"),
+            maximized: false,
+        }
+    }
+}
+
+pub use platform::run;

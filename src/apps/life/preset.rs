@@ -11,6 +11,7 @@ pub enum Preset {
     Tumbler,
     GliderGun,
     Acorn,
+    M47575,
 }
 
 pub static ALL: &[Preset] = &[
@@ -24,6 +25,7 @@ pub static ALL: &[Preset] = &[
     Preset::Tumbler,
     Preset::GliderGun,
     Preset::Acorn,
+    Preset::M47575,
 ];
 
 impl Preset {
@@ -93,6 +95,25 @@ impl Preset {
                 "   x   ",
                 "xx  xxx",
             ],
+            Preset::M47575 => vec![
+                "                   xxx",
+                "                    x ",
+                "      x               ",
+                "      x               ",
+                "      x               ",
+                "                      ",
+                "                      ",
+                "                      ",
+                "                      ",
+                "                      ",
+                "                      ",
+                "                      ",
+                "           x          ",
+                "x          xx         ",
+                "x                     ",
+                "x x                   ",
+                " xx                   ",
+            ]
         };
 
         let start_row = -(cells.len() as isize / 2);
@@ -129,6 +150,7 @@ impl std::fmt::Display for Preset {
                 Preset::Tumbler => "Tumbler",
                 Preset::GliderGun => "Gosper Glider Gun",
                 Preset::Acorn => "Acorn",
+                Preset::M47575 => "Methuselah 47575M",
             }
         )
     }

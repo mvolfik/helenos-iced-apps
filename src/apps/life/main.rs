@@ -1,3 +1,6 @@
+#![feature(thread_sleep_until)]
+
+use std::borrow::Cow;
 use std::collections::VecDeque;
 use std::fmt::Debug;
 use std::sync::mpsc::{self, TryRecvError};
@@ -15,7 +18,7 @@ use iced_widget::{button, checkbox, column, container, pick_list, row, slider, t
 mod preset;
 use preset::Preset;
 
-use crate::{Element, ProgramExt, SendMsgFn};
+use helenos_iced::{Element, ProgramExt, SendMsgFn, WindowOptions};
 
 impl Program for GameOfLife {
     type Message = Message;
@@ -112,7 +115,7 @@ fn looper(looper_state: Arc<(Mutex<LooperState>, Condvar)>, send_msg: SendMsgFn<
     }
 }
 
-pub struct GameOfLife {
+struct GameOfLife {
     grid: Grid,
     is_playing: bool,
     queued_ticks: usize,
@@ -138,7 +141,7 @@ impl Debug for GameOfLife {
 }
 
 #[derive(Debug, Clone)]
-pub enum Message {
+enum Message {
     Grid(grid::Message, usize),
     Tick,
     TogglePlayback,
@@ -150,7 +153,7 @@ pub enum Message {
 }
 
 impl GameOfLife {
-    pub fn new(create_send_msg: impl Fn() -> SendMsgFn<Message>) -> Self {
+    fn new(create_send_msg: impl Fn() -> SendMsgFn<Message>) -> Self {
         let (worker_sender, worker_receiver) = mpsc::channel();
         let worker_handle = std::thread::spawn({
             let send_msg = create_send_msg();
@@ -226,7 +229,7 @@ impl GameOfLife {
                 }
             }
             Message::PresetPicked(new_preset) => {
-                self.grid = Grid::from_preset(new_preset);
+                self.grid = Grid::from_preset(new_preset, self.grid.scaling());
                 self.version += 1;
             }
         }
@@ -238,12 +241,7 @@ impl GameOfLife {
 
     fn view(&self) -> Element<Message> {
         let version = self.version;
-        let controls = view_controls(
-            self.is_playing,
-            self.grid.are_lines_visible(),
-            self.speed,
-            self.grid.preset(),
-        );
+        let controls = self.view_controls();
 
         let content = column![
             self.grid
@@ -258,45 +256,60 @@ impl GameOfLife {
             .height(Length::Fill)
             .into()
     }
-}
 
-fn view_controls<'a>(
-    is_playing: bool,
-    is_grid_enabled: bool,
-    speed: usize,
-    preset: Preset,
-) -> Element<'a, Message> {
-    let playback_controls = row![
-        button(if is_playing { "Pause" } else { "Play" }).on_press(Message::TogglePlayback),
-        button("Next")
-            .on_press(Message::Next)
-            .style(button::secondary),
-    ]
-    .spacing(10);
-
-    let speed_controls = row![
-        slider(1.0..=1000.0, speed as f32, Message::SpeedChanged),
-        text!("x{speed}").size(16),
-    ]
-    .align_y(Vertical::Center)
-    .spacing(10);
-
-    row![
-        playback_controls,
-        speed_controls,
-        checkbox("Grid", is_grid_enabled).on_toggle(Message::ToggleGrid),
-        row![
-            pick_list(preset::ALL, Some(preset), Message::PresetPicked),
-            button("Clear")
-                .on_press(Message::Clear)
-                .style(button::danger)
+    fn view_controls(&self) -> Element<Message> {
+        let playback_controls = row![
+            button(if self.is_playing { "Pause" } else { "Play" })
+                .on_press(Message::TogglePlayback),
+            button("Next")
+                .on_press(Message::Next)
+                .style(button::secondary),
         ]
-        .spacing(10)
-    ]
-    .padding(10)
-    .spacing(20)
-    .align_y(Vertical::Center)
-    .into()
+        .spacing(10);
+
+        let speed_controls = row![
+            slider(1.0..=1000.0, self.speed as f32, Message::SpeedChanged),
+            text!("x{}", self.speed).size(16),
+        ]
+        .align_y(Vertical::Center)
+        .spacing(10);
+
+        let version = self.version;
+        let scaling = self.grid.scaling();
+        let scaling = row![
+            text!("Zoom: ").size(16),
+            slider(
+                grid::Grid::MIN_SCALING..=grid::Grid::MAX_SCALING,
+                scaling,
+                move |s| Message::Grid(grid::Message::Scaled(s, None), version),
+            )
+            .step(0.1),
+            text!("x{:.1}", scaling).size(16)
+        ]
+        .align_y(Vertical::Center)
+        .spacing(10);
+
+        column![
+            row![
+                playback_controls,
+                speed_controls,
+                checkbox("Grid", self.grid.are_lines_visible()).on_toggle(Message::ToggleGrid),
+                row![
+                    pick_list(preset::ALL, Some(self.grid.preset()), Message::PresetPicked),
+                    button("Clear")
+                        .on_press(Message::Clear)
+                        .style(button::danger)
+                ]
+                .spacing(10)
+            ]
+            .spacing(20)
+            .align_y(Vertical::Center),
+            scaling,
+        ]
+        .padding(10)
+        .spacing(20)
+        .into()
+    }
 }
 
 mod grid {
@@ -337,15 +350,15 @@ mod grid {
 
     impl Default for Grid {
         fn default() -> Self {
-            Self::from_preset(Preset::default())
+            Self::from_preset(Preset::default(), 0.5)
         }
     }
 
     impl Grid {
-        const MIN_SCALING: f32 = 0.1;
-        const MAX_SCALING: f32 = 2.0;
+        pub const MIN_SCALING: f32 = 0.1;
+        pub const MAX_SCALING: f32 = 2.0;
 
-        pub fn from_preset(preset: Preset) -> Self {
+        pub fn from_preset(preset: Preset, scaling: f32) -> Self {
             Self {
                 state: State::with_life(
                     preset
@@ -358,7 +371,7 @@ mod grid {
                 life_cache: Cache::default(),
                 grid_cache: Cache::default(),
                 translation: Vector::default(),
-                scaling: 1.0,
+                scaling,
                 show_lines: true,
                 last_tick_duration: Duration::default(),
                 last_queued_ticks: 0,
@@ -448,6 +461,10 @@ mod grid {
 
         pub fn are_lines_visible(&self) -> bool {
             self.show_lines
+        }
+
+        pub fn scaling(&self) -> f32 {
+            self.scaling
         }
 
         fn visible_region(&self, size: Size) -> Region {
@@ -964,4 +981,14 @@ mod grid {
             Self::None
         }
     }
+}
+
+fn main() {
+    helenos_iced::run(
+        |create_send_msg| GameOfLife::new(create_send_msg),
+        WindowOptions {
+            caption: Cow::Borrowed("Game of Life"),
+            maximized: true,
+        },
+    );
 }

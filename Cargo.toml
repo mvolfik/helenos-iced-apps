@@ -1,15 +1,15 @@
 [package]
 edition = "2024"
-name = "imageviewer-rs"
+name = "helenos-iced"
 version = "0.1.0"
 
 [dependencies]
 anyhow = "1.0.98"
 bytes = "1.10.1"
-iced_renderer = {git = "https://github.com/mvolfik/iced.git", branch="helenos", features = ["image", "tiny-skia"]}
-iced_runtime = {git = "https://github.com/mvolfik/iced.git", branch="helenos"}
-iced_tiny_skia = {git = "https://github.com/mvolfik/iced.git", branch="helenos", features = ["image"]}
-iced_widget = {git = "https://github.com/mvolfik/iced.git", branch="helenos", features = ["image", "canvas"]}
+iced_renderer = {git = "https://github.com/mvolfik/iced.git", branch = "helenos", features = ["image", "tiny-skia"]}
+iced_runtime = {git = "https://github.com/mvolfik/iced.git", branch = "helenos"}
+iced_tiny_skia = {git = "https://github.com/mvolfik/iced.git", branch = "helenos", features = ["image"]}
+iced_widget = {git = "https://github.com/mvolfik/iced.git", branch = "helenos", features = ["image", "canvas"]}
 image = "0.24.9"
 itertools = "0.14.0"
 raw-window-handle = "*"
@@ -22,7 +22,18 @@ winit = "0.30.9"
 helenos-ui = {git = "https://github.com/mvolfik/helenos-ui-rs.git"}
 
 [patch.crates-io]
+libc = {git = "https://github.com/mvolfik/rust-libc.git", branch = "helenos-v0.2"}
+raw-window-handle = {git = "https://github.com/mvolfik/raw-window-handle.git", branch = "helenos"}
 softbuffer = {git = "https://github.com/mvolfik/softbuffer.git", branch = "helenos"}
 swash = {git = "https://github.com/mvolfik/swash.git", branch = "helenos"}
-raw-window-handle = {git = "https://github.com/mvolfik/raw-window-handle.git", branch="helenos"}
-libc = {git = "https://github.com/mvolfik/rust-libc.git", branch = "helenos-v0.2"}
+
+[[bin]]
+name = "imageviewer-rs"
+path = "src/apps/imageviewer/main.rs"
+
+[[bin]]
+name = "life"
+path = "src/apps/life/main.rs"
+
+[profile.release]
+lto = true

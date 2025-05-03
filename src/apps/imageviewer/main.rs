@@ -1,3 +1,6 @@
+#![feature(float_minimum_maximum)]
+
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
@@ -10,7 +13,7 @@ use iced_widget::{
 };
 use image::{EncodableLayout, RgbaImage};
 
-use crate::{Element, ProgramExt};
+use helenos_iced::{Element, ProgramExt, WindowOptions};
 
 #[derive(Debug)]
 enum WorkerJob {
@@ -91,7 +94,7 @@ enum State {
 }
 
 #[derive(Debug)]
-pub struct Viewer {
+struct Viewer {
     worker_pair: Arc<(Mutex<WorkerJob>, Condvar)>,
     worker_handle: Mutex<Option<JoinHandle<()>>>,
     state: State,
@@ -123,7 +126,7 @@ impl ProgramExt for Viewer {
 }
 
 #[derive(Debug, Clone)]
-pub enum Message {
+enum Message {
     ImageClosed,
     SubfolderSelected(String),
     SubfolderUp,
@@ -405,4 +408,14 @@ impl Viewer {
             },
         }
     }
+}
+
+fn main() {
+    helenos_iced::run(
+        |create_send_msg| Viewer::new(std::env::args().nth(1), create_send_msg()),
+        WindowOptions {
+            caption: Cow::Borrowed("Image viewer.rs"),
+            maximized: false,
+        },
+    );
 }
