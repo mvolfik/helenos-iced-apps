@@ -115,8 +115,14 @@ fn looper(looper_state: Arc<(Mutex<LooperState>, Condvar)>, send_msg: SendMsgFn<
             std::thread::sleep_until(last_tick + Duration::from_millis(1000 / speed as u64));
         }
         last_tick = Some(Instant::now());
-        send_msg(Message::Tick);
+
+        // avoid send_msg if we are being stopped, it causes deadlock (send_msg from HelenOS framework implementation
+        // tries to lock the outer application lock, but it is already held by .stop())
         state = looper_state.lock().unwrap();
+        if matches!(*state, LooperState::Stop) {
+            return;
+        }
+        send_msg(Message::Tick);
     }
 }
 
